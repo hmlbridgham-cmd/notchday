@@ -17,6 +17,7 @@ function startCall(root) {
   let state = "idle";
   let callId = "";
   let partner = 0;
+  let partnerName = "";
   let mode = "audio";
   let pc = null;
   let localStream = null;
@@ -42,13 +43,13 @@ function startCall(root) {
   document.querySelector("#hangup")?.addEventListener("click", hangup);
   document.querySelector("#join-room")?.addEventListener("click", joinRoom);
 
-  function beginRing(nextMode, userId) {
+  function beginRing(_nextMode, userId) {
     if (!userId || state !== "idle") return;
-    mode = nextMode === "video" ? "video" : "audio";
+    mode = "audio";
     partner = userId;
     callId = crypto.randomUUID();
     state = "outgoing";
-    setStatus(`Ringing ${nameOf(userId)} for a practice ${mode === "video" ? "video" : "phone"} call.`);
+    setStatus(`Ringing ${nameOf(userId)} for a practice phone call.`);
     send({ t: "ring", to: partner, callId, mode });
   }
 
@@ -106,6 +107,7 @@ function startCall(root) {
   async function handle(msg) {
     if (msg.t === "online") return applyOnline(msg.ids || []);
     if (msg.t === "replaced") return setStatus("This practice line is open in another tab.");
+    if (msg.t === "chat") return onChat(msg);
     if (kind === "room") return handleRoom(msg);
     if (msg.t === "ring") return onRing(msg);
     if (msg.t === "accept" && msg.callId === callId) return onAccepted();
@@ -134,12 +136,41 @@ function startCall(root) {
     }
     state = "incoming";
     partner = msg.from;
+    partnerName = msg.fromName || "";
     callId = msg.callId;
-    mode = msg.mode === "video" ? "video" : "audio";
+    mode = "audio";
     const label = document.querySelector("#incoming-label");
-    if (label) label.textContent = `Practice ${mode === "video" ? "video" : "phone"} call from ${msg.fromName || nameOf(msg.from)}.`;
+    if (label) label.textContent = `Practice phone call from ${msg.fromName || nameOf(msg.from)}.`;
     if (incoming) incoming.hidden = false;
+    openDock();
     setStatus("Incoming practice call.");
+  }
+
+  function onChat(msg) {
+    const thread = document.querySelector("#chat-thread");
+    if (thread && Number(thread.dataset.with) === Number(msg.with)) {
+      refreshThread(thread);
+      return;
+    }
+    const ping = document.querySelector("#chat-ping");
+    if (!ping) return;
+    const link = document.createElement("a");
+    link.href = `/chats/${Number(msg.with) || ""}`;
+    link.textContent = `New practice message from ${msg.fromName || "a member"}.`;
+    ping.replaceChildren(link);
+    ping.hidden = false;
+    openDock();
+  }
+
+  async function refreshThread(node) {
+    try {
+      const response = await fetch(node.getAttribute("data-live"), { headers: { Accept: "text/html" } });
+      if (!response.ok) return;
+      const html = await response.text();
+      if (html && html !== node.innerHTML) node.innerHTML = html;
+    } catch {
+      // The next poll can try again.
+    }
   }
 
   async function onAccepted() {
@@ -268,7 +299,7 @@ function startCall(root) {
     if (localStream) return localStream;
     localStream = await navigator.mediaDevices.getUserMedia({
       audio: true,
-      video: kind === "room" ? true : mode === "video",
+      video: false,
     });
     if (localVideo) localVideo.srcObject = localStream;
     return localStream;
@@ -277,8 +308,9 @@ function startCall(root) {
   function showStage() {
     if (!stage) return;
     stage.hidden = false;
-    stage.classList.toggle("is-audio", mode !== "video");
+    stage.classList.add("is-audio");
     if (incoming) incoming.hidden = true;
+    openDock();
   }
 
   function addIce(conn, candidate) {
@@ -309,6 +341,18 @@ function startCall(root) {
     if (stage) stage.hidden = true;
     if (incoming) incoming.hidden = true;
     if (remoteVideo) remoteVideo.srcObject = null;
+    syncDock();
+  }
+
+  function openDock() {
+    if (root.classList.contains("call-dock")) root.classList.add("is-open");
+  }
+
+  function syncDock() {
+    if (!root.classList.contains("call-dock")) return;
+    const ping = document.querySelector("#chat-ping");
+    const open = (incoming && !incoming.hidden) || (stage && !stage.hidden) || (ping && !ping.hidden);
+    root.classList.toggle("is-open", Boolean(open));
   }
 
   function stopMedia() {
@@ -354,7 +398,7 @@ function startCall(root) {
   }
 
   function nameOf(id) {
-    return names[id] || names[String(id)] || "Member";
+    return names[id] || names[String(id)] || (Number(id) === partner ? partnerName : "") || "Member";
   }
 
   function roomKey(id) {

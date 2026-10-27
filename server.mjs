@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,6 +8,7 @@ import {
   addIdeaNote,
   addInterviewNote,
   addMeetingNote,
+  addMessage,
   addSupport,
   addTeamMember,
   claimInterview,
@@ -35,10 +36,12 @@ import {
   joinMeeting,
   leaveTeam,
   listBySimulation,
+  listChatPeers,
   listIdeas,
   listInterviews,
   listJoinedOtherMeetings,
   listMeetingsForMonth,
+  listMessages,
   listSupport,
   listTasksForTeam,
   listTasksForUser,
@@ -49,19 +52,29 @@ import {
   meetingMembership,
   meetingNotes,
   openDb,
+  openPunch,
+  practiceMillis,
+  punchIn,
+  punchOut,
   readSession,
+  setAvatarType,
   setReportShared,
+  setSimulation,
   setTaskStatus,
   teamMembers,
   upcomingMeetings,
   updatePractice,
 } from "./lib/db.mjs";
-import { cleanLine, cleanText, validEmail, validStamp, wallStamp } from "./lib/format.mjs";
+import { cleanLine, cleanText, cleanZoomLink, validEmail, validStamp, wallStamp } from "./lib/format.mjs";
 import { notesHtml, noticeText } from "./lib/html.mjs";
 import {
   authPage,
   calendarPage,
+  chatPage,
+  chatsPage,
+  chatThread,
   deskPage,
+  enterSimPage,
   floorPage,
   homePage,
   ideaPage,
@@ -69,6 +82,7 @@ import {
   interviewPage,
   interviewsPage,
   meetingPage,
+  memberPage,
   membersPage,
   messagePage,
   profilePage,
@@ -80,7 +94,7 @@ import {
   teamsPage,
 } from "./lib/pages.mjs";
 import { barChart, cityById, isDataset, loadDataset } from "./lib/quarry.mjs";
-import { attachSignal } from "./lib/signal.mjs";
+import { attachSignal, notifyUser } from "./lib/signal.mjs";
 
 const ROOT = import.meta.dirname;
 const PUBLIC_DIR = join(ROOT, "public");
@@ -117,11 +131,25 @@ const routes = [
   ["POST", "/login", loginPost],
   ["GET", "/signup", signupGet],
   ["POST", "/signup", signupPost],
+  ["GET", "/:sim/login", simLoginGet],
+  ["POST", "/:sim/login", simLoginPost],
+  ["GET", "/:sim/signup", simSignupGet],
+  ["POST", "/:sim/signup", simSignupPost],
   ["POST", "/logout", logout],
   ["GET", "/desk", desk],
   ["GET", "/profile", profileGet],
   ["POST", "/profile", profilePost],
+  ["POST", "/profile/photo", profilePhoto],
+  ["GET", "/avatars/:id", avatarGet],
+  ["POST", "/punch/in", punchInPost],
+  ["POST", "/punch/out", punchOutPost],
   ["GET", "/members", members],
+  ["GET", "/members/:id", memberGet],
+  ["POST", "/members/:id/meeting", memberMeeting],
+  ["GET", "/chats", chatsGet],
+  ["GET", "/chats/:id/messages", chatMessages],
+  ["GET", "/chats/:id", chatGet],
+  ["POST", "/chats/:id", chatPost],
   ["GET", "/teams", teamsGet],
   ["POST", "/teams", teamsPost],
   ["GET", "/teams/:id", teamGet],
@@ -282,6 +310,12 @@ function simOf(value) {
   return Object.hasOwn(SIMS, value) ? value : "";
 }
 
+function doorOf(value) {
+  if (typeof value === "string") return simOf(value);
+  if (value && typeof value === "object") return simOf(value.sim);
+  return "";
+}
+
 function safeNext(value) {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\r\n]/.test(value)) {
     return "/desk";
@@ -294,7 +328,8 @@ function loginGet(ctx) {
   sendHtml(ctx, 200, authPage(ctx, { mode: "login", values: {}, next: safeNext(ctx.query.get("next")) }));
 }
 
-function loginPost(ctx) {
+function loginPost(ctx, params) {
+  const door = doorOf(params);
   if (!requireCsrf(ctx)) return;
   const email = cleanLine(ctx.body.get("email"), 120).toLowerCase();
   const password = String(ctx.body.get("password") || "");
@@ -306,12 +341,49 @@ function loginPost(ctx) {
       error: "That email and password do not match.",
       values: { email },
       next: safeNext(ctx.body.get("next")),
+      door,
     }));
     return;
   }
+  if (door) setSimulation(user.id, door);
   deleteSession(ctx.session.id);
   const session = createSession(user.id);
-  redirect(ctx, safeNext(ctx.body.get("next")), { session });
+  const next = door ? "/desk" : safeNext(ctx.body.get("next"));
+  redirect(ctx, next, { session });
+}
+
+function simLoginGet(ctx, params) {
+  const simulation = simOf(params.sim);
+  if (!simulation) return gate(ctx, 404, "Not found", "That page is not in the studio.");
+  if (ctx.user) {
+    if (ctx.user.simulation === simulation) return redirect(ctx, "/desk");
+    return sendHtml(ctx, 200, enterSimPage(ctx, simulation));
+  }
+  sendHtml(ctx, 200, authPage(ctx, { mode: "login", values: {}, next: "/desk", door: simulation }));
+}
+
+function simLoginPost(ctx, params) {
+  const simulation = simOf(params.sim);
+  if (!simulation) return gate(ctx, 404, "Not found", "That page is not in the studio.");
+  if (ctx.user) {
+    if (!requireCsrf(ctx)) return;
+    setSimulation(ctx.user.id, simulation);
+    return redirect(ctx, "/desk?m=simulation");
+  }
+  return loginPost(ctx, simulation);
+}
+
+function simSignupGet(ctx, params) {
+  const simulation = simOf(params.sim);
+  if (!simulation) return gate(ctx, 404, "Not found", "That page is not in the studio.");
+  if (ctx.user) return redirect(ctx, "/desk");
+  sendHtml(ctx, 200, authPage(ctx, { mode: "signup", values: { simulation }, door: simulation }));
+}
+
+function simSignupPost(ctx, params) {
+  const simulation = simOf(params.sim);
+  if (!simulation) return gate(ctx, 404, "Not found", "That page is not in the studio.");
+  return signupPost(ctx, simulation);
 }
 
 function signupGet(ctx) {
@@ -319,23 +391,24 @@ function signupGet(ctx) {
   sendHtml(ctx, 200, authPage(ctx, { mode: "signup", values: {} }));
 }
 
-function signupPost(ctx) {
+function signupPost(ctx, params) {
+  const door = doorOf(params);
   if (!requireCsrf(ctx)) return;
   const values = {
     name: cleanLine(ctx.body.get("name"), 80),
     email: cleanLine(ctx.body.get("email"), 120).toLowerCase(),
-    simulation: simOf(ctx.body.get("simulation")),
+    simulation: door || simOf(ctx.body.get("simulation")),
     practice_title: cleanLine(ctx.body.get("practice_title"), 80),
     practice_role: cleanLine(ctx.body.get("practice_role"), 80),
   };
   const password = String(ctx.body.get("password") || "");
   const error = accountError(values, password);
   if (error) {
-    sendHtml(ctx, 400, authPage(ctx, { mode: "signup", error, values }));
+    sendHtml(ctx, 400, authPage(ctx, { mode: "signup", error, values, door }));
     return;
   }
   if (findUserByEmail(values.email)) {
-    sendHtml(ctx, 400, authPage(ctx, { mode: "signup", error: "That email is already a member.", values }));
+    sendHtml(ctx, 400, authPage(ctx, { mode: "signup", error: "That email is already a member.", values, door }));
     return;
   }
   const user = createUser({
@@ -371,12 +444,86 @@ function desk(ctx) {
   if (!requireUser(ctx)) return;
   const tasks = listTasksForUser(ctx.user.id);
   const { mine } = upcomingMeetings(ctx.user.id, ctx.user.simulation, wallStamp());
-  sendHtml(ctx, 200, deskPage(ctx, { tasks, meetings: mine }));
+  sendHtml(ctx, 200, deskPage(ctx, { tasks, meetings: mine, ...practiceClock(ctx.user) }));
 }
 
 function profileGet(ctx) {
   if (!requireUser(ctx)) return;
-  sendHtml(ctx, 200, profilePage(ctx, { values: ctx.user }));
+  sendHtml(ctx, 200, profilePage(ctx, { values: ctx.user, ...practiceClock(ctx.user) }));
+}
+
+function profilePhoto(ctx) {
+  if (!requireUser(ctx)) return;
+  if (ctx.body.get("__too_large") === "1") {
+    sendHtml(ctx, 413, profilePage(ctx, {
+      error: "That photo is too large. Use a PNG, JPEG, or WebP under 2 MB.",
+      values: ctx.user,
+      ...practiceClock(ctx.user),
+    }));
+    return;
+  }
+  if (!requireCsrf(ctx)) return;
+  const avatar = join(ROOT, "data", "avatars", String(ctx.user.id));
+  if (ctx.body.get("remove") === "1") {
+    if (existsSync(avatar)) unlinkSync(avatar);
+    setAvatarType(ctx.user.id, "");
+    redirect(ctx, "/profile?m=photo-removed");
+    return;
+  }
+  const upload = typeof ctx.body.file === "function" ? ctx.body.file("photo") : null;
+  const type = imageType(upload?.bytes);
+  if (!type) {
+    sendHtml(ctx, 400, profilePage(ctx, {
+      error: "Choose a PNG, JPEG, or WebP photo.",
+      values: ctx.user,
+      ...practiceClock(ctx.user),
+    }));
+    return;
+  }
+  mkdirSync(join(ROOT, "data", "avatars"), { recursive: true });
+  writeFileSync(avatar, upload.bytes);
+  setAvatarType(ctx.user.id, type);
+  redirect(ctx, "/profile?m=photo-saved");
+}
+
+function avatarGet(ctx, params) {
+  if (!requireUser(ctx)) return;
+  const id = idOf(params);
+  const member = id ? findUser(id) : null;
+  const type = member ? AVATAR_TYPES[member.avatar_type] : "";
+  const file = id ? join(ROOT, "data", "avatars", String(id)) : "";
+  if (!type || !file || !existsSync(file)) {
+    const headers = securityHeaders({ "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+    ctx.res.writeHead(404, headers);
+    ctx.res.end("No profile photo.");
+    return;
+  }
+  ctx.res.writeHead(200, securityHeaders({
+    "Content-Type": type,
+    "Cache-Control": "private, no-store",
+    "Content-Length": statSync(file).size,
+    "X-Content-Type-Options": "nosniff",
+  }));
+  createReadStream(file).pipe(ctx.res);
+}
+
+function punchInPost(ctx) {
+  if (!requireUser(ctx) || !requireSimulation(ctx) || !requireCsrf(ctx)) return;
+  punchIn(ctx.user.id, ctx.user.simulation);
+  redirect(ctx, "/desk?m=punched-in");
+}
+
+function punchOutPost(ctx) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  punchOut(ctx.user.id);
+  redirect(ctx, "/desk?m=punched-out");
+}
+
+function practiceClock(user) {
+  return {
+    punch: openPunch(user.id),
+    practiceMs: practiceMillis(user.id, user.simulation),
+  };
 }
 
 function profilePost(ctx) {
@@ -390,6 +537,7 @@ function profilePost(ctx) {
     sendHtml(ctx, 400, profilePage(ctx, {
       error: "Pick a simulation, a practice job title, and a practice role.",
       values,
+      ...practiceClock(ctx.user),
     }));
     return;
   }
@@ -404,6 +552,103 @@ function profilePost(ctx) {
 function members(ctx) {
   if (!requireUser(ctx)) return;
   sendHtml(ctx, 200, membersPage(ctx, listUsers()));
+}
+
+function chatsGet(ctx) {
+  if (!requireUser(ctx) || !requireSimulation(ctx)) return;
+  sendHtml(ctx, 200, chatsPage(ctx, listChatPeers(ctx.user.id, ctx.user.simulation)));
+}
+
+function chatGet(ctx, params) {
+  if (!requireUser(ctx) || !requireSimulation(ctx)) return;
+  const peer = loadChatPeer(ctx, params);
+  if (!peer) return;
+  sendHtml(ctx, 200, chatPage(ctx, { peer, messages: listMessages(ctx.user.simulation, ctx.user.id, peer.id) }));
+}
+
+function chatPost(ctx, params) {
+  if (!requireUser(ctx) || !requireSimulation(ctx) || !requireCsrf(ctx)) return;
+  const peer = loadChatPeer(ctx, params);
+  if (!peer) return;
+  const body = cleanText(ctx.body.get("body"), 2000);
+  if (!body) {
+    sendHtml(ctx, 400, chatPage(ctx, {
+      peer,
+      messages: listMessages(ctx.user.simulation, ctx.user.id, peer.id),
+      error: "Write a practice message.",
+    }));
+    return;
+  }
+  addMessage({
+    simulation: ctx.user.simulation,
+    senderId: ctx.user.id,
+    recipientId: peer.id,
+    body,
+  });
+  notifyUser(peer.id, { t: "chat", with: ctx.user.id, fromName: ctx.user.name });
+  notifyUser(ctx.user.id, { t: "chat", with: peer.id, fromName: peer.name });
+  redirect(ctx, `/chats/${peer.id}?m=chat-sent`);
+}
+
+function chatMessages(ctx, params) {
+  if (!requireUser(ctx) || !requireSimulation(ctx)) return;
+  const peer = loadChatPeer(ctx, params);
+  if (!peer) return;
+  if (ctx.query.get("fragment") === "1") {
+    return sendFragment(ctx, chatThread(ctx, listMessages(ctx.user.simulation, ctx.user.id, peer.id)));
+  }
+  redirect(ctx, `/chats/${peer.id}`);
+}
+
+function loadChatPeer(ctx, params) {
+  const peer = findUser(idOf(params));
+  if (!peer || peer.id === ctx.user.id) {
+    gate(ctx, 404, "Not found", "That member is not here.");
+    return null;
+  }
+  if (peer.simulation !== ctx.user.simulation) {
+    gate(ctx, 403, "Practice chat", "Practice chat and meetings stay with members in the same simulation.");
+    return null;
+  }
+  return peer;
+}
+
+function memberGet(ctx, params) {
+  if (!requireUser(ctx) || !requireSimulation(ctx)) return;
+  const member = loadChatPeer(ctx, params);
+  if (!member) return;
+  sendHtml(ctx, 200, memberPage(ctx, {
+    member,
+    values: { starts_at: hoursFromNow(1), ends_at: hoursFromNow(2) },
+  }));
+}
+
+function memberMeeting(ctx, params) {
+  if (!requireUser(ctx) || !requireSimulation(ctx) || !requireCsrf(ctx)) return;
+  const member = loadChatPeer(ctx, params);
+  if (!member) return;
+  const values = {
+    title: cleanLine(ctx.body.get("title"), 120),
+    agenda: cleanText(ctx.body.get("agenda"), 2000),
+    starts_at: String(ctx.body.get("starts_at") || ""),
+    ends_at: String(ctx.body.get("ends_at") || ""),
+  };
+  const zoom = cleanZoomLink(ctx.body.get("zoom_link"));
+  const error = meetingError(values) || (zoom === null ? "Paste an https Zoom link, or leave it blank." : "");
+  if (error) {
+    return sendHtml(ctx, 400, memberPage(ctx, { member, error, values: { ...values, zoom_link: String(ctx.body.get("zoom_link") || "") } }));
+  }
+  const id = createMeeting({
+    simulation: ctx.user.simulation,
+    title: values.title,
+    agenda: values.agenda,
+    zoomLink: zoom,
+    startsAt: values.starts_at,
+    endsAt: values.ends_at,
+    createdBy: ctx.user.id,
+    inviteIds: [member.id],
+  });
+  redirect(ctx, `/meetings/${id}?m=meeting-set`);
 }
 
 function teamsGet(ctx) {
@@ -530,8 +775,9 @@ function meetingCreate(ctx) {
     starts_at: String(ctx.body.get("starts_at") || ""),
     ends_at: String(ctx.body.get("ends_at") || ""),
   };
-  const error = meetingError(values);
-  if (error) return sendHtml(ctx, 400, calendarWith(ctx, error, values));
+  const zoom = cleanZoomLink(ctx.body.get("zoom_link"));
+  const error = meetingError(values) || (zoom === null ? "Paste an https Zoom link, or leave it blank." : "");
+  if (error) return sendHtml(ctx, 400, calendarWith(ctx, error, { ...values, zoom_link: String(ctx.body.get("zoom_link") || "") }));
   const allowed = new Set(listBySimulation(ctx.user.simulation).map((member) => member.id));
   const inviteIds = ctx.body
     .getAll("with")
@@ -541,6 +787,7 @@ function meetingCreate(ctx) {
     simulation: ctx.user.simulation,
     title: values.title,
     agenda: values.agenda,
+    zoomLink: zoom,
     startsAt: values.starts_at,
     endsAt: values.ends_at,
     createdBy: ctx.user.id,
@@ -992,8 +1239,16 @@ function staticPath(pathname) {
   return file;
 }
 
+const AVATAR_TYPES = {
+  "image/jpeg": "image/jpeg",
+  "image/png": "image/png",
+  "image/webp": "image/webp",
+};
+
 async function readBody(req) {
   if (req.method !== "POST") return new URLSearchParams();
+  const type = String(req.headers["content-type"] || "");
+  if (type.toLowerCase().includes("multipart/form-data")) return readMultipart(req, type);
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
@@ -1006,6 +1261,78 @@ async function readBody(req) {
     chunks.push(chunk);
   }
   return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+}
+
+async function readMultipart(req, type) {
+  const match = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(type);
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 2_500_000) {
+      req.destroy();
+      const params = new URLSearchParams();
+      params.set("__too_large", "1");
+      return formData(params, null);
+    }
+    chunks.push(chunk);
+  }
+  if (!match) return formData(new URLSearchParams(), null);
+  return parseMultipart(Buffer.concat(chunks), match[1] || match[2]);
+}
+
+function formData(params, file) {
+  return {
+    get(name) {
+      return params.get(name);
+    },
+    getAll(name) {
+      return params.getAll(name);
+    },
+    file(name) {
+      return file && file.field === name ? file : null;
+    },
+  };
+}
+
+function parseMultipart(buffer, boundary) {
+  const params = new URLSearchParams();
+  let file = null;
+  const delimiter = Buffer.from(`\r\n--${boundary}`);
+  const preamble = Buffer.from(`--${boundary}`);
+  let cursor = buffer.subarray(0, preamble.length).equals(preamble) ? preamble.length : buffer.indexOf(delimiter);
+  if (cursor < 0) return formData(params, null);
+  if (!buffer.subarray(0, preamble.length).equals(preamble)) cursor += delimiter.length;
+  while (cursor < buffer.length) {
+    if (buffer[cursor] === 45 && buffer[cursor + 1] === 45) break;
+    if (buffer[cursor] === 13 && buffer[cursor + 1] === 10) cursor += 2;
+    const headerEnd = buffer.indexOf("\r\n\r\n", cursor, "utf8");
+    if (headerEnd < 0) break;
+    const headerText = buffer.subarray(cursor, headerEnd).toString("utf8");
+    const bodyStart = headerEnd + 4;
+    const next = buffer.indexOf(delimiter, bodyStart);
+    const bodyEnd = next < 0 ? buffer.length : next;
+    const bytes = buffer.subarray(bodyStart, bodyEnd);
+    const disposition = /content-disposition:[^\r\n]*/i.exec(headerText)?.[0] || "";
+    const name = /name="([^"]*)"/.exec(disposition)?.[1] || "";
+    const filename = /filename="([^"]*)"/.exec(disposition);
+    if (name && filename) {
+      if (!file && filename[1]) file = { field: name, filename: filename[1], bytes: Buffer.from(bytes) };
+    } else if (name) {
+      params.append(name, bytes.toString("utf8"));
+    }
+    if (next < 0) break;
+    cursor = next + delimiter.length;
+  }
+  return formData(params, file);
+}
+
+function imageType(bytes) {
+  if (!bytes || bytes.length < 12 || bytes.length > 2_000_000) return "";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  return "";
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

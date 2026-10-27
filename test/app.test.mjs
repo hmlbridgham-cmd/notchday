@@ -32,6 +32,13 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(home.html, /Studio contact/);
     assert.match(home.html, /253-241-7270/);
     assert.match(home.html, /tel:\+12532417270/);
+    assert.match(home.html, /fake-company simulation, not a real employer/);
+    assert.equal(home.html.includes('id="call-app"'), false);
+    const copper = await read(client(), "/copperline");
+    assert.match(copper.html, /data-world="copperline"/);
+    assert.match(copper.html, /href="\/copperline\/login"/);
+    assert.match(copper.html, /href="\/copperline\/signup"/);
+    assert.equal(copper.html.toLowerCase().includes("video"), false);
     const support = await read(client(), "/support");
     assert.match(support.html, /no subscription/i);
     assert.match(support.html, /no paywall/i);
@@ -232,13 +239,255 @@ describe("daymark", { concurrency: 1 }, () => {
     left.ws.send(JSON.stringify({ t: "ring", to: secondId, callId: "practice-1", mode: "video" }));
     const ring = await right.until("ring");
     assert.equal(ring.from, firstId);
-    assert.equal(ring.mode, "video");
+    assert.equal(ring.mode, "audio");
     assert.equal(ring.callId, "practice-1");
     right.ws.send(JSON.stringify({ t: "accept", to: firstId, callId: "practice-1", mode: "video" }));
     const accepted = await left.until("accept");
     assert.equal(accepted.from, secondId);
     left.ws.close();
     right.ws.close();
+  });
+
+  test("members chat and schedule a practice meeting inside one simulation", async () => {
+    const cam = client();
+    const dee = client();
+    const eli = client();
+    const camDesk = await signup(cam, "Cam Lane", "cam-lane@example.com", "kindling", "Idea host", "Table voice");
+    const deeDesk = await signup(dee, "Dee Brook", "dee-brook@example.com", "kindling", "Idea guest", "Listener");
+    await signup(eli, "Eli West", "eli-west@example.com", "copperline", "Floor host", "Caller");
+    const camId = Number(camDesk.html.match(/data-user-id="(\d+)"/)[1]);
+    const deeId = Number(deeDesk.html.match(/data-user-id="(\d+)"/)[1]);
+    const eliId = Number((await read(eli, "/desk")).html.match(/data-user-id="(\d+)"/)[1]);
+
+    assert.match(camDesk.html, /Practice chat/);
+    assert.equal(camDesk.html.includes('id="call-app"'), false);
+    assert.equal(camDesk.html.toLowerCase().includes("hired"), false);
+
+    const members = await read(cam, "/members");
+    assert.match(members.html, new RegExp(`href="/chats/${deeId}"`));
+    assert.match(members.html, new RegExp(`href="/members/${deeId}"`));
+    assert.match(members.html, /Practice chat and practice meetings/);
+
+    const self = await cam.fetch(`/chats/${camId}`);
+    assert.equal(self.status, 404);
+    const blocked = await eli.fetch(`/chats/${camId}`);
+    assert.equal(blocked.status, 403);
+    assert.ok((await blocked.text()).includes(DISCLAIMER));
+
+    const empty = await post(cam, `/chats/${deeId}`, { csrf: csrfOf(camDesk.html), body: "   " });
+    assert.equal(empty.status, 400);
+
+    const thread = await read(cam, `/chats/${deeId}`);
+    assert.match(thread.html, /Practice chat · simulation/);
+    assert.match(thread.html, /Schedule a practice meeting with Dee Brook/);
+    assert.equal(thread.html.includes('id="call-app"'), false);
+    assert.equal(thread.html.toLowerCase().includes("video"), false);
+    assert.equal(thread.html.toLowerCase().includes("hired"), false);
+    assert.ok(thread.html.includes(DISCLAIMER));
+
+    const deeSock = openSocket(dee.cookies.get("dm"));
+    const eliSock = openSocket(eli.cookies.get("dm"));
+    await deeSock.ready;
+    await eliSock.ready;
+    await deeSock.until("online");
+    await eliSock.until("online");
+
+    const sent = await post(cam, `/chats/${deeId}`, {
+      csrf: csrfOf(thread.html),
+      body: "Hello <practice>\nSee you on the simulation line.",
+    });
+    assert.equal(sent.status, 303);
+    assert.equal(pathOnly(sent.headers.get("location")), `/chats/${deeId}`);
+    const ping = await deeSock.until("chat");
+    assert.equal(ping.with, camId);
+    assert.equal(ping.fromName, "Cam Lane");
+    assert.equal(ping.body, undefined);
+
+    cam.ws = openSocket(cam.cookies.get("dm"));
+    await cam.ws.ready;
+    cam.ws.ws.send(JSON.stringify({ t: "ring", to: eliId, callId: "cross-sim", mode: "video" }));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(eliSock.messages.some((msg) => msg.t === "ring"), false);
+
+    const seen = await read(dee, `/chats/${camId}`);
+    assert.match(seen.html, /Hello &lt;practice&gt;/);
+    assert.match(seen.html, /See you on the simulation line/);
+    assert.match(seen.html, /Practice chat · simulation/);
+    const reply = await post(dee, `/chats/${camId}`, {
+      csrf: csrfOf(seen.html),
+      body: "Practice reply received.",
+    });
+    assert.equal(reply.status, 303);
+    const fragment = await read(cam, `/chats/${deeId}/messages?fragment=1`);
+    assert.match(fragment.html, /Practice reply received/);
+    assert.equal(fragment.html.includes("<!DOCTYPE"), false);
+
+    const deniedPost = await post(eli, `/chats/${camId}`, {
+      csrf: csrfOf((await read(eli, "/desk")).html),
+      body: "This should stay out of the simulation.",
+    });
+    assert.equal(deniedPost.status, 403);
+    const still = await read(cam, `/chats/${deeId}/messages?fragment=1`);
+    assert.equal(still.html.includes("stay out"), false);
+
+    const form = await read(cam, `/members/${deeId}`);
+    assert.match(form.html, /Schedule a practice meeting with Dee Brook/);
+    assert.match(form.html, /Schedule practice meeting/);
+    const bad = await post(cam, `/members/${deeId}/meeting`, {
+      csrf: csrfOf(form.html),
+      title: "Too short",
+      starts_at: stamp(16),
+      ends_at: stamp(16),
+      agenda: "",
+    });
+    assert.equal(bad.status, 400);
+    assert.match(await bad.text(), /end after it starts/);
+    const badZoom = await post(cam, `/members/${deeId}/meeting`, {
+      csrf: csrfOf(form.html),
+      title: "Outside link",
+      agenda: "This link is not Zoom.",
+      starts_at: stamp(14),
+      ends_at: stamp(15),
+      zoom_link: "https://example.com/meet",
+    });
+    assert.equal(badZoom.status, 400);
+    assert.match(await badZoom.text(), /https Zoom link/);
+    const scheduled = await post(cam, `/members/${deeId}/meeting`, {
+      csrf: csrfOf(form.html),
+      title: "Sync <practice>",
+      agenda: "A practice meeting between two members.",
+      starts_at: stamp(14),
+      ends_at: stamp(15),
+      zoom_link: "https://zoom.us/j/123456789",
+    });
+    assert.equal(scheduled.status, 303);
+    const scheduledPage = await read(cam, scheduled.headers.get("location"));
+    assert.match(scheduledPage.html, /Simulation meeting scheduled/);
+    assert.match(scheduledPage.html, /https:\/\/zoom\.us\/j\/123456789/);
+    const meetingUrl = pathOnly(scheduled.headers.get("location"));
+    const invited = await read(dee, meetingUrl);
+    assert.match(invited.html, /Simulation meeting · practice/);
+    assert.match(invited.html, /Sync &lt;practice&gt;/);
+    assert.match(invited.html, /Invited/);
+    assert.match(invited.html, /Zoom link for this practice meeting/);
+    const joined = await post(dee, `${meetingUrl}/join`, { csrf: csrfOf(invited.html) });
+    assert.equal(joined.status, 303);
+    const joinedPage = await read(dee, meetingUrl);
+    assert.match(joinedPage.html, /Joined/);
+    const outsider = await eli.fetch(meetingUrl);
+    assert.equal(outsider.status, 403);
+    const outsiderMeet = await post(eli, `/members/${camId}/meeting`, {
+      csrf: csrfOf((await read(eli, "/calendar")).html),
+      title: "Cross simulation",
+      starts_at: stamp(18),
+      ends_at: stamp(19),
+    });
+    assert.equal(outsiderMeet.status, 403);
+
+    const interviews = await read(dee, "/interviews");
+    const requested = await post(dee, "/interviews", {
+      csrf: csrfOf(interviews.html),
+      simulation: "kindling",
+      practice_role: "Table host",
+      note: "Practice with a member who is in another simulation.",
+    });
+    const interviewUrl = pathOnly(requested.headers.get("location"));
+    const open = await read(eli, interviewUrl);
+    const claimed = await post(eli, `${interviewUrl}/claim`, { csrf: csrfOf(open.html) });
+    assert.equal(claimed.status, 303);
+    eliSock.ws.send(JSON.stringify({ t: "ring", to: deeId, callId: "interview-practice", mode: "video" }));
+    const ring = await deeSock.until("ring");
+    assert.equal(ring.from, eliId);
+    assert.equal(ring.mode, "audio");
+    assert.equal(ring.callId, "interview-practice");
+
+    deeSock.ws.close();
+    eliSock.ws.close();
+    cam.ws.ws.close();
+  });
+
+  test("simulation doors keep practice addresses, photos, and punch time inside the app", async () => {
+    const door = await read(client(), "/kindling/signup");
+    assert.match(door.html, /data-world="kindling"/);
+    assert.match(door.html, /Join Kindling/);
+    assert.match(door.html, /name="simulation" value="kindling"/);
+    assert.equal(door.html.includes("mailto:"), false);
+
+    const nia = client();
+    const joined = await submit(nia, "/kindling/signup", {
+      name: "Nia Stone",
+      email: "nia-stone@example.com",
+      password: "practice-pass",
+      simulation: "copperline",
+      practice_title: "Table scribe",
+      practice_role: "Note taker",
+    });
+    assert.match(joined.html, /Kindling/);
+    assert.match(joined.html, /Practice time\. Not employment\./);
+    assert.match(joined.html, /Punched out/);
+    assert.match(joined.html, /0s in Kindling/);
+
+    const profile = await read(nia, "/profile");
+    assert.match(profile.html, /Simulation address/);
+    assert.match(profile.html, /nia\.stone@kindling\.daymark\.simulation/);
+    assert.match(profile.html, /only works inside the simulation/);
+    assert.equal(profile.html.includes("mailto:"), false);
+
+    const punched = await post(nia, "/punch/in", { csrf: csrfOf(profile.html) });
+    assert.equal(punched.status, 303);
+    const onClock = await read(nia, punched.headers.get("location"));
+    assert.match(onClock.html, /Punched in/);
+    assert.match(onClock.html, /Practice time\. Not employment\./);
+
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const saved = await postMultipart(nia, "/profile/photo", csrfOf(profile.html), {
+      name: "photo",
+      filename: "dot.png",
+      type: "image/png",
+      buffer: png,
+    });
+    assert.equal(saved.status, 303);
+    const withPhoto = await read(nia, "/profile");
+    assert.match(withPhoto.html, /src="\/avatars\/\d+"/);
+    const avatarPath = withPhoto.html.match(/src="(\/avatars\/\d+)"/)[1];
+    const avatar = await nia.fetch(avatarPath);
+    assert.equal(avatar.status, 200);
+    assert.equal(avatar.headers.get("content-type"), "image/png");
+    const bytes = Buffer.from(await avatar.arrayBuffer());
+    assert.equal(bytes[0], 0x89);
+    assert.equal(bytes[1], 0x50);
+    const guest = await client().fetch(avatarPath);
+    assert.equal(guest.status, 303);
+    const rejected = await postMultipart(nia, "/profile/photo", csrfOf(withPhoto.html), {
+      name: "photo",
+      filename: "notes.txt",
+      type: "text/plain",
+      buffer: Buffer.from("not a photo"),
+    });
+    assert.equal(rejected.status, 400);
+    assert.match(await rejected.text(), /PNG, JPEG, or WebP/);
+
+    const moved = await post(nia, "/quarry/login", { csrf: csrfOf(withPhoto.html) });
+    assert.equal(moved.status, 303);
+    const quarryDesk = await read(nia, moved.headers.get("location"));
+    assert.match(quarryDesk.html, /This practice is now in that simulation/);
+    assert.match(quarryDesk.html, /Punched out/);
+    assert.match(quarryDesk.html, /0s in Quarry/);
+    const quarryProfile = await read(nia, "/profile");
+    assert.match(quarryProfile.html, /nia\.stone@quarry\.daymark\.simulation/);
+    assert.equal(quarryProfile.html.includes("nia.stone@kindling.daymark.simulation"), false);
+    assert.equal(quarryProfile.html.includes("mailto:"), false);
+
+    const hanna = client();
+    const hannaProfile = await submit(hanna, "/login", {
+      email: SEED.email,
+      password: SEED.password,
+      next: "/profile",
+    });
+    assert.equal(hannaProfile.html.includes("@daymark.simulation"), false);
   });
 });
 
@@ -283,6 +532,23 @@ async function post(person, path, fields) {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(fields),
+  });
+}
+
+async function postMultipart(person, path, csrf, file) {
+  const boundary = "----daymarktest";
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="csrf"\r\n\r\n${csrf}\r\n`),
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\nContent-Type: ${file.type}\r\n\r\n`,
+    ),
+    file.buffer,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  return person.fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+    body,
   });
 }
 
@@ -334,6 +600,7 @@ function openSocket(cookie) {
   });
   return {
     ws,
+    messages,
     ready: new Promise((resolve, reject) => {
       ws.once("open", resolve);
       ws.once("error", reject);

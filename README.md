@@ -4,6 +4,12 @@ Daymark is a simulation studio. Hanna Bridgham is CEO. The studio contact number
 
 Copperline, Kindling, and Quarry are simulations. They are not jobs, not employers, and not work history. Support is an optional donation. There is no subscription and no paywall.
 
+Copperline, Kindling, and Quarry each have their own door, look, and login. Daymark stays in the footer as the studio.
+
+Members in the same simulation can send practice chat and schedule a practice meeting. A meeting can store an optional Zoom link that a member pastes in. There is no in-app video calling.
+
+A profile can show a photo, practice time for the current simulation, and a simulation address such as `name@kindling.daymark.simulation`. That address only works inside the app. Daymark does not send email.
+
 ## Run
 
 ```bash
