@@ -161,6 +161,10 @@ import { attachSignal, notifyUser } from "./lib/signal.mjs";
 
 const ROOT = import.meta.dirname;
 const PUBLIC_DIR = join(ROOT, "public");
+
+function dataDir() {
+  return process.env.DAYMARK_DATA || join(ROOT, "data");
+}
 const DUMMY_HASH = hashPassword("not-a-real-password");
 const TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -287,7 +291,7 @@ const routes = [
 ];
 
 export async function start({ port, host, dbFile } = {}) {
-  openDb(dbFile || join(ROOT, "data", "daymark.sqlite"));
+  openDb(dbFile || join(dataDir(), "daymark.sqlite"));
   const server = createServer((req, res) => {
     handle(req, res).catch((error) => {
       console.error(error);
@@ -578,7 +582,7 @@ function profilePhoto(ctx) {
     return;
   }
   if (!requireCsrf(ctx)) return;
-  const avatar = join(ROOT, "data", "avatars", String(ctx.user.id));
+  const avatar = join(dataDir(), "avatars", String(ctx.user.id));
   if (ctx.body.get("remove") === "1") {
     if (existsSync(avatar)) unlinkSync(avatar);
     setAvatarType(ctx.user.id, "");
@@ -595,7 +599,7 @@ function profilePhoto(ctx) {
     }));
     return;
   }
-  mkdirSync(join(ROOT, "data", "avatars"), { recursive: true });
+  mkdirSync(join(dataDir(), "avatars"), { recursive: true });
   writeFileSync(avatar, upload.bytes);
   setAvatarType(ctx.user.id, type);
   redirect(ctx, "/profile?m=photo-saved");
@@ -606,7 +610,7 @@ function avatarGet(ctx, params) {
   const id = idOf(params);
   const member = id ? findUser(id) : null;
   const type = member ? AVATAR_TYPES[member.avatar_type] : "";
-  const file = id ? join(ROOT, "data", "avatars", String(id)) : "";
+  const file = id ? join(dataDir(), "avatars", String(id)) : "";
   if (!type || !file || !existsSync(file)) {
     const headers = securityHeaders({ "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
     ctx.res.writeHead(404, headers);
@@ -1879,7 +1883,7 @@ function filePost(ctx, params) {
     mime: kind.mime,
     bytes: upload.bytes.length,
   });
-  const dir = join(ROOT, "data", "files");
+  const dir = join(dataDir(), "files");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, String(id)), upload.bytes);
   redirect(ctx, `/${sim}/room?m=file-saved`);
@@ -1888,7 +1892,7 @@ function filePost(ctx, params) {
 function fileGet(ctx, params) {
   if (!requireUser(ctx)) return;
   const row = getSharedFile(idOf(params));
-  const file = row ? join(ROOT, "data", "files", String(row.id)) : "";
+  const file = row ? join(dataDir(), "files", String(row.id)) : "";
   if (!row || !file || !existsSync(file) || !canEnter(ctx.user, row.simulation)) {
     const status = row && !canEnter(ctx.user, row.simulation) ? 403 : 404;
     const headers = securityHeaders({ "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "private, no-store" });

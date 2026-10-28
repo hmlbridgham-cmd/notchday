@@ -35,6 +35,10 @@ The local seed login is Hanna Bridgham, `hanna.bridgham@example.com`, password `
 npm test
 ```
 
+## Deploy
+
+Render uses `render.yaml` from the open branch `cursor/daymark-simulation-studio-2caf`. The service runs Node 22, keeps the database, profile photos, and shared files on a disk, and marks the session cookie Secure. `RFAB_API_KEY` stays out of git. Set it in the Render dashboard only if you regenerate logos there.
+
 ## Logos
 
 Logo slots are on the pages. When `RFAB_API_KEY` is in the environment or in `.env`, generate the four marks with:

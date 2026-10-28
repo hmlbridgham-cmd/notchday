@@ -1,0 +1,24 @@
+# Render Blueprint for Notchday. Secrets stay in the Render dashboard, not in git.
+services:
+  - type: web
+    name: notchday
+    runtime: node
+    branch: cursor/daymark-simulation-studio-2caf
+    plan: 0.5c-512mb
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeployTrigger: commit
+    domains:
+      - notchday.com
+    envVars:
+      - key: NODE_VERSION
+        value: "22.23.4"
+      - key: DAYMARK_DATA
+        value: /var/data
+      - key: DAYMARK_SECURE
+        value: "1"
+    disk:
+      name: notchday-data
+      mountPath: /var/data
+      sizeGB: 1
