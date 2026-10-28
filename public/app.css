@@ -123,6 +123,17 @@ nav, .account { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: 
 nav a { color: inherit; text-decoration: none; }
 nav a[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--copper); }
 .account a { color: inherit; }
+a.button,
+.account a.button {
+  background: var(--ink);
+  color: var(--paper);
+}
+a.button.secondary,
+.account a.button.secondary {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
 .ceo {
   display: inline-block;
   font-size: 0.78rem;
@@ -153,6 +164,26 @@ h2 { font-size: 1.7rem; margin: 0 0 0.6rem; }
 }
 .hint, .empty { color: var(--ink-soft); }
 .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.slideshow { display: grid; gap: 0.7rem; }
+.slides {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 100%;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--white);
+}
+.slide {
+  scroll-snap-align: start;
+  box-sizing: border-box;
+  padding: 1rem;
+  min-height: 16rem;
+}
+.slide-nav, .vote-row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+button.vote-on { box-shadow: inset 0 0 0 2px var(--copper); }
 
 .button, button, .textish {
   font: inherit;

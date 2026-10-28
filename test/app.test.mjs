@@ -31,7 +31,19 @@ describe("daymark", { concurrency: 1 }, () => {
     for (const id of ["notchday", "yapmark", "flinttable", "chartslate"]) {
       assert.match(home.html, new RegExp(`data-logo="${id}"`));
     }
-    assert.match(home.html, /Hanna Bridgham, CEO of Notchday/);
+    assert.match(home.html, /the CEO, the mysterious leader/);
+    assert.equal(home.html.includes("Hanna Bridgham"), false);
+    assert.equal(home.html.includes("hanna.bridgham"), false);
+    assert.equal(home.html.includes("hmlbridgham@gmail.com"), false);
+    assert.match(home.html, /Other humans sign up and show up as employees, so it is a social site/);
+    assert.match(home.html, /Yapmark Corp\./);
+    assert.match(home.html, /Flinttable Inc\./);
+    assert.match(home.html, /Chartslate Ltd\./);
+    assert.match(home.html, /Report a bug/);
+    assert.match(home.html, /class="button" href="\/signup">Create account/);
+    const css = await (await client().fetch("/app.css")).text();
+    assert.match(css, /\.account a\.button/);
+    assert.match(css, /color: var\(--paper\)/);
     assert.match(home.html, /separate company simulations/);
     assert.match(home.html, /A Notchday simulation membership includes all three/);
     assert.equal(home.html.includes("253-241-7270"), false);
@@ -76,8 +88,10 @@ describe("daymark", { concurrency: 1 }, () => {
       next: "/desk",
     });
     assert.equal(desk.res.status, 200);
-    assert.match(desk.html, /CEO of Notchday/);
-    assert.match(desk.html, /Hanna Bridgham/);
+    assert.match(desk.html, /the CEO, the mysterious leader/);
+    assert.equal(desk.html.includes("Hanna Bridgham"), false);
+    assert.equal(desk.html.includes("hanna.bridgham"), false);
+    assert.equal(desk.html.includes("hmlbridgham@gmail.com"), false);
     assert.ok(desk.html.includes(DISCLAIMER));
     const gone = await post(hanna, "/logout", { csrf: csrfOf(desk.html) });
     assert.equal(gone.status, 303);
@@ -508,7 +522,9 @@ describe("daymark", { concurrency: 1 }, () => {
       next: "/profile",
     });
     assert.equal(hannaProfile.html.includes("@notchday.simulation"), false);
-    assert.match(hannaProfile.html, /<span class="ceo">/);
+    assert.match(hannaProfile.html, /the CEO, the mysterious leader/);
+    assert.equal(hannaProfile.html.includes("Hanna Bridgham"), false);
+    assert.equal(hannaProfile.html.includes("hanna.bridgham"), false);
   });
 
   test("company rooms, complaints, files, votes, and the CEO lock", async () => {
@@ -697,13 +713,13 @@ describe("daymark", { concurrency: 1 }, () => {
     const voted = await post(poe, `${ideaUrl}/vote`, { csrf: csrfOf(ideaPage.html) });
     assert.equal(voted.status, 303);
     const counted = await read(poe, ideaUrl);
-    assert.match(counted.html, /1 vote/);
+    assert.match(counted.html, /1 upvote/);
     const qui = client();
     await signup(qui, "Qui Pitch", "qui-pitch@example.com", "flinttable", "Second pitch", "Voter");
     const quiPage = await read(qui, ideaUrl);
     await post(qui, `${ideaUrl}/vote`, { csrf: csrfOf(quiPage.html) });
     const both = await read(poe, ideaUrl);
-    assert.match(both.html, /2 votes/);
+    assert.match(both.html, /2 upvotes/);
   });
 
   test("pitch comments, self-organized groups, missions, and contests", async () => {
@@ -774,7 +790,8 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(joined.status, 303);
     const quiGroup = await read(qui, groupUrl);
     assert.match(quiGroup.html, /Qui Comment/);
-    assert.match(quiGroup.html, /Hanna Bridgham, the only CEO/);
+    assert.match(quiGroup.html, /the CEO, the mysterious leader/);
+    assert.equal(quiGroup.html.includes("Hanna Bridgham"), false);
 
     const hanna = client();
     await submit(hanna, "/login", { email: SEED.email, password: SEED.password, next: "/groups" });
@@ -797,7 +814,7 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(assigned.html, /Keep the spark in the hallway/);
     assert.match(assigned.html, /not a job &lt;brief&gt;/);
     assert.match(assigned.html, /Pin one spark/);
-    assert.match(assigned.html, /Simulation task from Hanna/);
+    assert.match(assigned.html, /Simulation task from the CEO/);
     const taskAction = assigned.html.match(/action="(\/group-tasks\/\d+)"/);
     assert.ok(taskAction);
     const finished = await post(qui, taskAction[1], { csrf: csrfOf(assigned.html), status: "done" });
@@ -1080,6 +1097,112 @@ describe("daymark", { concurrency: 1 }, () => {
     const openJoined = await read(bea, openUrl);
     assert.match(openJoined.html, new RegExp(`action="${openUrl}/leave"`));
     assert.match(openJoined.html, /Anyone in the company can join/);
+  });
+
+  test("think-tank gallery, data machine, bug reports, and a hidden owner", async () => {
+    const home = await read(client(), "/");
+    assert.match(home.html, /fake-company simulation, not a real employer\. Other humans sign up/);
+    const flint = await read(client(), "/flinttable");
+    assert.match(flint.html, /problem-solving think tank/i);
+    assert.match(flint.html, /upvote, downvote, and comment/i);
+    const chart = await read(client(), "/chartslate");
+    assert.match(chart.html, /data-and-graphs machine/);
+    assert.match(chart.html, /Mine public data/);
+    assert.match(chart.html, /insight/);
+    for (const path of ["/", "/flinttable", "/chartslate", "/login", "/signup", "/bugs"]) {
+      const { html } = await read(client(), path);
+      assert.equal(html.includes("Hanna Bridgham"), false, path);
+      assert.equal(html.includes("hanna.bridgham"), false, path);
+      assert.equal(html.includes("hmlbridgham@gmail.com"), false, path);
+      assert.equal(html.includes("253-241-7270"), false, path);
+    }
+
+    const poe = client();
+    await signup(poe, "Poe Gallery", "poe-gallery@example.com", "flinttable", "Pitch voice", "Striker");
+    const table = await read(poe, "/flinttable/table");
+    assert.match(table.html, /Pitch gallery/);
+    assert.match(table.html, /slideshow/);
+    const idea = await post(poe, "/flinttable/ideas", {
+      csrf: csrfOf(table.html),
+      title: "A stuck door",
+      pitch: "The think tank should name the stuck door before it votes.",
+    });
+    const ideaUrl = pathOnly(idea.headers.get("location"));
+    const gallery = await read(poe, "/flinttable/table");
+    assert.match(gallery.html, /Upvote/);
+    assert.match(gallery.html, /Downvote/);
+    assert.match(gallery.html, /A stuck door/);
+    const up = await post(poe, `${ideaUrl}/vote`, {
+      csrf: csrfOf(gallery.html),
+      direction: "1",
+      back: "gallery",
+    });
+    assert.equal(up.status, 303);
+    assert.match(up.headers.get("location"), /\/flinttable\/table/);
+    const qui = client();
+    await signup(qui, "Qui Gallery", "qui-gallery@example.com", "flinttable", "Second pitch", "Voter");
+    const quiTable = await read(qui, "/flinttable/table");
+    const down = await post(qui, `${ideaUrl}/vote`, {
+      csrf: csrfOf(quiTable.html),
+      direction: "-1",
+      back: "gallery",
+    });
+    assert.equal(down.status, 303);
+    const counted = await read(poe, "/flinttable/table");
+    assert.match(counted.html, /1 upvote/);
+    assert.match(counted.html, /1 downvote/);
+    const commented = await post(qui, `${ideaUrl}/comments`, {
+      csrf: csrfOf(quiTable.html),
+      body: "Try the hinge before the hammer <gallery>",
+      back: "gallery",
+    });
+    assert.equal(commented.status, 303);
+    const withComment = await read(poe, ideaUrl);
+    assert.match(withComment.html, /Try the hinge before the hammer &lt;gallery&gt;/);
+    const room = await read(poe, "/flinttable/room");
+    assert.match(room.html, /Pitch gallery/);
+    assert.match(room.html, /Upvote/);
+
+    const chartRoom = await read(
+      await (async () => {
+        const ada = client();
+        await signup(ada, "Ada Graph", "ada-graph@example.com", "chartslate", "Graph maker", "Miner");
+        return ada;
+      })(),
+      "/chartslate/room",
+    );
+    assert.match(chartRoom.html, /data-and-graphs machine/);
+    assert.match(chartRoom.html, /Mine data/);
+    assert.match(chartRoom.html, /insight/i);
+
+    const guest = client();
+    const form = await read(guest, "/bugs");
+    assert.match(form.html, /Send bug report/);
+    const sent = await post(guest, "/bugs", {
+      csrf: csrfOf(form.html),
+      body: "The create-account label was hard to read <bug>",
+      page: "/signup",
+    });
+    assert.equal(sent.status, 303);
+    const stored = await read(guest, sent.headers.get("location"));
+    assert.match(stored.html, /NOTCHDAY_SMTP_URL/);
+    assert.equal(stored.html.includes("hmlbridgham@gmail.com"), false);
+    assert.equal(stored.html.includes("Hanna Bridgham"), false);
+    const ceo = client();
+    await submit(ceo, "/login", { email: SEED.email, password: SEED.password, next: "/profile" });
+    const profile = await read(ceo, "/profile");
+    assert.match(profile.html, /Owner inbox/);
+    assert.match(profile.html, /The create-account label was hard to read &lt;bug&gt;/);
+    assert.match(profile.html, /the CEO, the mysterious leader/);
+    assert.equal(profile.html.includes("Hanna Bridgham"), false);
+    assert.equal(profile.html.includes("hanna.bridgham"), false);
+    assert.equal(profile.html.includes("hmlbridgham@gmail.com"), false);
+    const outsider = client();
+    await signup(outsider, "Nia Outside", "nia-outside@example.com", "yapmark", "Floor voice", "Talker");
+    const hidden = await read(outsider, "/members");
+    assert.match(hidden.html, /the CEO, the mysterious leader/);
+    assert.equal(hidden.html.includes("Hanna Bridgham"), false);
+    assert.equal(hidden.html.includes("hanna.bridgham"), false);
   });
 });
 

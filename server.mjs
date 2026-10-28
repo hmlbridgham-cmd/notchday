@@ -4,9 +4,10 @@ import { extname, join, normalize, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { clearCookie, hashPassword, parseCookies, sessionCookie, tokensEqual, verifyPassword } from "./lib/auth.mjs";
 import { belongsTo, canEnter, isCeo, sharesCompany } from "./lib/access.mjs";
-import { JOIN_RULES, SEED, SIMS, TIP_URL } from "./lib/copy.mjs";
+import { JOIN_RULES, publicName, SEED, SIMS, TIP_URL } from "./lib/copy.mjs";
 import {
   activityScore,
+  addBugReport,
   addCheckin,
   addComplaint,
   addIdeaNote,
@@ -23,6 +24,7 @@ import {
   clearGroupRequest,
   announceRivalryWinner,
   clearRivalry,
+  castVote,
   completeInterview,
   createContest,
   createGroup,
@@ -67,6 +69,7 @@ import {
   leaveGroup,
   leaveTeam,
   listApplications,
+  listBugReports,
   listContestEntries,
   listContests,
   listContestsFor,
@@ -112,13 +115,12 @@ import {
   setSimulation,
   setTaskStatus,
   teamMembers,
-  toggleVote,
   upcomingMeetings,
   updatePractice,
-  userVoted,
 } from "./lib/db.mjs";
 import { cleanLine, cleanText, cleanZoomLink, validEmail, validStamp, wallStamp } from "./lib/format.mjs";
 import { commentsHtml, notesHtml, noticeText } from "./lib/html.mjs";
+import { sendOwnerNotice, veilHtml } from "./lib/mail.mjs";
 import {
   authPage,
   calendarPage,
@@ -135,6 +137,7 @@ import {
   openingInterviewPage,
   openingPage,
   openingsPage,
+  bugPage,
   homePage,
   ideaPage,
   ideasPage,
@@ -202,6 +205,8 @@ const routes = [
   ["POST", "/hr", hrPost],
   ["GET", "/support", supportGet],
   ["POST", "/support", supportPost],
+  ["GET", "/bugs", bugGet],
+  ["POST", "/bugs", bugPost],
   ["GET", "/login", loginGet],
   ["POST", "/login", loginPost],
   ["GET", "/signup", signupGet],
@@ -373,7 +378,7 @@ function sendHtml(ctx, status, html) {
   const headers = securityHeaders({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
   if (ctx.setCookie) headers["Set-Cookie"] = ctx.setCookie;
   ctx.res.writeHead(status, headers);
-  ctx.res.end(html);
+  ctx.res.end(veilHtml(html));
 }
 
 function redirect(ctx, location, { session, clear } = {}) {
@@ -564,11 +569,7 @@ function desk(ctx) {
 
 function profileGet(ctx) {
   if (!requireUser(ctx)) return;
-  sendHtml(ctx, 200, profilePage(ctx, {
-    values: ctx.user,
-    complaints: isCeo(ctx.user) ? listComplaints() : null,
-    ...practiceClock(ctx.user),
-  }));
+  sendHtml(ctx, 200, profilePage(ctx, { values: ctx.user, ...profileExtras(ctx) }));
 }
 
 function profilePhoto(ctx) {
@@ -577,7 +578,7 @@ function profilePhoto(ctx) {
     sendHtml(ctx, 413, profilePage(ctx, {
       error: "That photo is too large. Use a PNG, JPEG, or WebP under 2 MB.",
       values: ctx.user,
-      ...practiceClock(ctx.user),
+      ...profileExtras(ctx),
     }));
     return;
   }
@@ -595,7 +596,7 @@ function profilePhoto(ctx) {
     sendHtml(ctx, 400, profilePage(ctx, {
       error: "Choose a PNG, JPEG, or WebP photo.",
       values: ctx.user,
-      ...practiceClock(ctx.user),
+      ...profileExtras(ctx),
     }));
     return;
   }
@@ -645,6 +646,14 @@ function practiceClock(user) {
   };
 }
 
+function profileExtras(ctx) {
+  return {
+    complaints: isCeo(ctx.user) ? listComplaints() : null,
+    bugReports: isCeo(ctx.user) ? listBugReports() : null,
+    ...practiceClock(ctx.user),
+  };
+}
+
 function profilePost(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   const requested = simOf(ctx.body.get("simulation"));
@@ -661,8 +670,7 @@ function profilePost(ctx) {
     sendHtml(ctx, 400, profilePage(ctx, {
       error: "Pick a company simulation, a job title, and a job role.",
       values,
-      complaints: isCeo(ctx.user) ? listComplaints() : null,
-      ...practiceClock(ctx.user),
+      ...profileExtras(ctx),
     }));
     return;
   }
@@ -716,8 +724,8 @@ function chatPost(ctx, params) {
     recipientId: peer.id,
     body,
   });
-  notifyUser(peer.id, { t: "chat", with: ctx.user.id, fromName: ctx.user.name });
-  notifyUser(ctx.user.id, { t: "chat", with: peer.id, fromName: peer.name });
+  notifyUser(peer.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user) });
+  notifyUser(ctx.user.id, { t: "chat", with: peer.id, fromName: publicName(peer) });
   redirect(ctx, `/chats/${peer.id}?m=chat-sent`);
 }
 
@@ -1040,7 +1048,7 @@ function floor(ctx) {
 
 function ideasGet(ctx) {
   if (!requireUser(ctx)) return;
-  sendHtml(ctx, 200, ideasPage(ctx, { ideas: listIdeas(), canWrite: canEnter(ctx.user, "flinttable") }));
+  sendHtml(ctx, 200, ideasPage(ctx, { ideas: listIdeas(ctx.user.id), canWrite: canEnter(ctx.user, "flinttable") }));
 }
 
 function ideaCreate(ctx) {
@@ -1050,7 +1058,7 @@ function ideaCreate(ctx) {
   const pitch = cleanText(ctx.body.get("pitch"), 2000);
   if (!title || !pitch) {
     sendHtml(ctx, 400, ideasPage(ctx, {
-      ideas: listIdeas(),
+      ideas: listIdeas(ctx.user.id),
       canWrite: true,
       error: "Add a title and the idea.",
     }));
@@ -1062,24 +1070,36 @@ function ideaCreate(ctx) {
 
 function ideaGet(ctx, params) {
   if (!requireUser(ctx)) return;
-  const idea = getIdea(idOf(params));
+  const idea = getIdea(idOf(params), ctx.user.id);
   if (!idea) return gate(ctx, 404, "Not found", "That pitch is not on the table.");
   const writer = canEnter(ctx.user, "flinttable");
   sendHtml(ctx, 200, ideaPage(ctx, {
     idea,
     notes: ideaNotes(idea.id),
     canWrite: writer,
-    voted: writer && userVoted(idea.id, ctx.user.id),
   }));
 }
 
 function ideaCommentPost(ctx, params) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
-  const idea = getIdea(idOf(params));
+  const idea = getIdea(idOf(params), ctx.user.id);
   if (!idea) return gate(ctx, 404, "Not found", "That pitch is not on the table.");
   if (!canEnter(ctx.user, "flinttable")) return redirect(ctx, "/membership?m=locked");
   const body = cleanText(ctx.body.get("body"), 2000);
+  const back = String(ctx.body.get("back") || "");
   if (!body) {
+    if (back === "gallery") {
+      sendHtml(ctx, 400, ideasPage(ctx, {
+        ideas: listIdeas(ctx.user.id),
+        canWrite: true,
+        error: "Write a comment.",
+      }));
+      return;
+    }
+    if (back === "room") {
+      sendHtml(ctx, 400, roomPage(ctx, roomBundle(ctx, "flinttable", { error: "Write a comment." })));
+      return;
+    }
     sendHtml(ctx, 400, ideaPage(ctx, {
       idea,
       notes: ideaNotes(idea.id),
@@ -1089,6 +1109,8 @@ function ideaCommentPost(ctx, params) {
     return;
   }
   addIdeaNote(idea.id, ctx.user.id, body);
+  if (back === "gallery") return redirect(ctx, `/flinttable/table?m=comment-saved#pitch-${idea.id}`);
+  if (back === "room") return redirect(ctx, `/flinttable/room?m=comment-saved#pitch-${idea.id}`);
   redirect(ctx, `/flinttable/ideas/${idea.id}?m=comment-saved`);
 }
 
@@ -1103,9 +1125,14 @@ function ideaCommentGet(ctx, params) {
 function ideaVote(ctx, params) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   if (!canEnter(ctx.user, "flinttable")) return redirect(ctx, "/membership?m=locked");
-  const idea = getIdea(idOf(params));
+  const idea = getIdea(idOf(params), ctx.user.id);
   if (!idea) return gate(ctx, 404, "Not found", "That pitch is not on the table.");
-  toggleVote(idea.id, ctx.user.id);
+  const raw = String(ctx.body.get("direction") || "1");
+  const direction = raw === "-1" || raw === "down" ? -1 : 1;
+  castVote(idea.id, ctx.user.id, direction);
+  const back = String(ctx.body.get("back") || "");
+  if (back === "gallery") return redirect(ctx, `/flinttable/table?m=vote-saved#pitch-${idea.id}`);
+  if (back === "room") return redirect(ctx, `/flinttable/room?m=vote-saved#pitch-${idea.id}`);
   redirect(ctx, `/flinttable/ideas/${idea.id}?m=vote-saved`);
 }
 
@@ -1307,7 +1334,7 @@ function rivalrySides(ctx) {
 
 function rivalryPost(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
-  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "Hanna sets which companies compete.");
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "The CEO, the mysterious leader, sets which companies compete.");
   const pair = rivalrySides(ctx);
   if (pair) setRivalry(pair[0], pair[1]);
   redirect(ctx, "/scoreboard?m=rivalry-set");
@@ -1315,7 +1342,7 @@ function rivalryPost(ctx) {
 
 function rivalryClear(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
-  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "Hanna sets which companies compete.");
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "The CEO, the mysterious leader, sets which companies compete.");
   const pair = rivalrySides(ctx);
   if (pair) clearRivalry(pair[0], pair[1]);
   redirect(ctx, "/scoreboard?m=rivalry-cleared");
@@ -1323,7 +1350,7 @@ function rivalryClear(ctx) {
 
 function rivalryAssignment(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
-  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "Hanna sends the competition assignment.");
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "The CEO, the mysterious leader, sends the competition assignment.");
   const pair = rivalrySides(ctx);
   const assignment = cleanText(ctx.body.get("assignment"), 500);
   if (!pair || !assignment || !setRivalryAssignment(pair[0], pair[1], assignment)) {
@@ -1335,7 +1362,7 @@ function rivalryAssignment(ctx) {
 
 function rivalryWinner(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
-  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "Hanna announces the winner.");
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "The CEO, the mysterious leader, announces the winner.");
   const pair = rivalrySides(ctx);
   const winner = simOf(ctx.body.get("winner"));
   const note = cleanText(ctx.body.get("note"), 500);
@@ -1517,7 +1544,7 @@ function openingApply(ctx, params) {
     recipientId: poster.id,
     body: message,
   });
-  notifyUser(poster.id, { t: "chat", with: ctx.user.id, fromName: ctx.user.name });
+  notifyUser(poster.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user) });
   redirect(ctx, `/openings/${opening.id}?m=opening-applied`);
 }
 
@@ -1540,7 +1567,7 @@ function openingInterviewPost(ctx, params) {
     recipientId: applicant.id,
     body: `Simulation interview for "${opening.title}" in ${opening.group_name}.\nThis is inside the work LARP. It is not a hire.`,
   });
-  notifyUser(applicant.id, { t: "chat", with: ctx.user.id, fromName: ctx.user.name });
+  notifyUser(applicant.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user) });
   redirect(ctx, `/opening-interviews/${id}?m=opening-interview`);
 }
 
@@ -1711,7 +1738,7 @@ function missionPost(ctx, params) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   const group = loadGroup(ctx, params);
   if (!group) return;
-  if (!isCeo(ctx.user)) return gate(ctx, 403, "Simulation mission", "Hanna sends simulation missions to groups.");
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Simulation mission", "The CEO, the mysterious leader, sends simulation missions to groups.");
   const title = cleanLine(ctx.body.get("title"), 120);
   const brief = cleanText(ctx.body.get("brief"), 2000);
   if (!title) return sendHtml(ctx, 400, groupView(ctx, group, "Name the simulation mission."));
@@ -1723,7 +1750,7 @@ function groupTaskPost(ctx, params) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   const group = loadGroup(ctx, params);
   if (!group) return;
-  if (!isCeo(ctx.user)) return gate(ctx, 403, "Simulation task", "Hanna sends simulation tasks to groups.");
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Simulation task", "The CEO, the mysterious leader, sends simulation tasks to groups.");
   const title = cleanLine(ctx.body.get("title"), 120);
   const detail = cleanText(ctx.body.get("detail"), 2000);
   const missionId = Number(ctx.body.get("mission_id")) || 0;
@@ -1762,7 +1789,7 @@ function contestsGet(ctx) {
 
 function contestsPost(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
-  if (!isCeo(ctx.user)) return gate(ctx, 403, "Company contest", "Hanna sends company-wide simulation contests.");
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Company contest", "The CEO, the mysterious leader, sends company-wide simulation contests.");
   const simulation = simOf(ctx.body.get("simulation"));
   const title = cleanLine(ctx.body.get("title"), 120);
   const brief = cleanText(ctx.body.get("brief"), 2000);
@@ -1808,13 +1835,13 @@ function contestEntry(ctx, params) {
   redirect(ctx, `/contests/${contest.id}?m=contest-entered`);
 }
 
-function roomBundle(sim, extra = {}) {
+function roomBundle(ctx, sim, extra = {}) {
   return {
     sim,
     messages: listRoomMessages(sim),
     files: listFiles(sim),
     checkins: sim === "yapmark" ? latestCheckins(sim) : [],
-    pitches: sim === "flinttable" ? listIdeas() : [],
+    pitches: sim === "flinttable" ? listIdeas(ctx.user?.id) : [],
     contests: listContests(sim),
     ...extra,
   };
@@ -1837,7 +1864,7 @@ function roomGet(ctx, params) {
   if (!requireUser(ctx)) return;
   if (sim === "chartslate") return quarryGet(ctx);
   if (!canEnter(ctx.user, sim)) return sendHtml(ctx, 200, enterSimPage(ctx, sim));
-  sendHtml(ctx, 200, roomPage(ctx, roomBundle(sim)));
+  sendHtml(ctx, 200, roomPage(ctx, roomBundle(ctx, sim)));
 }
 
 function roomPost(ctx, params) {
@@ -1847,7 +1874,7 @@ function roomPost(ctx, params) {
   if (!canEnter(ctx.user, sim)) return redirect(ctx, "/membership?m=locked");
   const body = cleanText(ctx.body.get("body"), 2000);
   if (!body) {
-    return sendHtml(ctx, 400, roomPage(ctx, roomBundle(sim, { error: "Write a room message." })));
+    return sendHtml(ctx, 400, roomPage(ctx, roomBundle(ctx, sim, { error: "Write a room message." })));
   }
   addRoomMessage({ simulation: sim, userId: ctx.user.id, body });
   redirect(ctx, `/${sim}/room?m=room-sent`);
@@ -1872,7 +1899,7 @@ function filePost(ctx, params) {
   const upload = typeof ctx.body.file === "function" ? ctx.body.file("upload") : null;
   const kind = sharedKind(upload);
   if (!kind) {
-    return sendHtml(ctx, 400, roomPage(ctx, roomBundle(sim, {
+    return sendHtml(ctx, 400, roomPage(ctx, roomBundle(ctx, sim, {
       fileError: "Share a PNG, JPEG, WebP, PDF, TXT, or CSV under 2 MB.",
     })));
   }
@@ -1946,10 +1973,26 @@ function supportPost(ctx) {
   redirect(ctx, TIP_URL);
 }
 
+function bugGet(ctx) {
+  sendHtml(ctx, 200, bugPage(ctx, { page: cleanLine(ctx.query.get("page"), 200) }));
+}
+
+async function bugPost(ctx) {
+  if (!requireCsrf(ctx)) return;
+  const body = cleanText(ctx.body.get("body"), 2000);
+  const page = cleanLine(ctx.body.get("page"), 200);
+  if (!body) return sendHtml(ctx, 400, bugPage(ctx, { error: "Write what went wrong.", page }));
+  const who = ctx.user ? publicName(ctx.user) : "A visitor";
+  const text = [`From: ${who}`, page ? `Page: ${page}` : "", "", body].filter((line) => line !== undefined).join("\n");
+  const sent = await sendOwnerNotice({ subject: "Notchday bug report", text });
+  addBugReport({ userId: ctx.user?.id || 0, page, body, mailed: sent.mailed });
+  redirect(ctx, `/bugs?m=${sent.mailed ? "bug-sent" : "bug-stored"}`);
+}
+
 function sendFragment(ctx, html) {
   const headers = securityHeaders({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
   ctx.res.writeHead(200, headers);
-  ctx.res.end(html);
+  ctx.res.end(veilHtml(html));
 }
 
 function monthCells(year, month, meetings) {

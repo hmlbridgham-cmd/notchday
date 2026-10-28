@@ -18,6 +18,10 @@ services:
         value: /var/data
       - key: DAYMARK_SECURE
         value: "1"
+      - key: NOTCHDAY_SMTP_URL
+        sync: false
+      - key: NOTCHDAY_MAIL_FROM
+        sync: false
     disk:
       name: notchday-data
       mountPath: /var/data
