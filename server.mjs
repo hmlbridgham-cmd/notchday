@@ -4,7 +4,7 @@ import { extname, join, normalize, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { clearCookie, hashPassword, parseCookies, sessionCookie, tokensEqual, verifyPassword } from "./lib/auth.mjs";
 import { belongsTo, canEnter, isCeo, sharesCompany } from "./lib/access.mjs";
-import { SEED, SIMS, TIP_URL } from "./lib/copy.mjs";
+import { JOIN_RULES, SEED, SIMS, TIP_URL } from "./lib/copy.mjs";
 import {
   activityScore,
   addCheckin,
@@ -20,6 +20,8 @@ import {
   addSharedFile,
   addTeamMember,
   claimInterview,
+  clearGroupRequest,
+  announceRivalryWinner,
   clearRivalry,
   completeInterview,
   createContest,
@@ -58,6 +60,7 @@ import {
   interviewNotes,
   isGroupMember,
   isTeamMember,
+  hasGroupRequest,
   joinGroup,
   joinMeeting,
   latestCheckins,
@@ -71,6 +74,7 @@ import {
   listCompany,
   listComplaints,
   listFiles,
+  listGroupRequests,
   listGroupTasks,
   listMissions,
   listOpeningsForGroup,
@@ -97,11 +101,13 @@ import {
   practiceMillis,
   punchIn,
   punchOut,
+  requestGroupJoin,
   readSession,
   setAvatarType,
   setMembership,
   setReportShared,
   setRivalry,
+  setRivalryAssignment,
   setGroupTaskStatus,
   setSimulation,
   setTaskStatus,
@@ -187,6 +193,8 @@ const routes = [
   ["GET", "/scoreboard", scoreboardGet],
   ["POST", "/rivalries", rivalryPost],
   ["POST", "/rivalries/clear", rivalryClear],
+  ["POST", "/rivalries/assignment", rivalryAssignment],
+  ["POST", "/rivalries/winner", rivalryWinner],
   ["POST", "/hr", hrPost],
   ["GET", "/support", supportGet],
   ["POST", "/support", supportPost],
@@ -234,6 +242,9 @@ const routes = [
   ["GET", "/groups/:id", groupGet],
   ["POST", "/groups/:id/join", groupJoin],
   ["POST", "/groups/:id/leave", groupLeave],
+  ["POST", "/groups/:id/requests/accept", groupRequestAccept],
+  ["POST", "/groups/:id/requests/decline", groupRequestDecline],
+  ["POST", "/groups/:id/requests/withdraw", groupRequestWithdraw],
   ["POST", "/groups/:id/missions", missionPost],
   ["POST", "/groups/:id/tasks", groupTaskPost],
   ["POST", "/group-tasks/:id", groupTaskStatus],
@@ -1273,26 +1284,62 @@ function membershipPost(ctx) {
   redirect(ctx, "/desk?m=membership");
 }
 
-function scoreboardGet(ctx) {
+function renderScoreboard(ctx, error = "") {
   const rivalries = listRivalries();
   const scores = Object.fromEntries(Object.keys(SIMS).map((id) => [id, activityScore(id)]));
-  sendHtml(ctx, 200, scoreboardPage(ctx, { rivalries, scores }));
+  return scoreboardPage(ctx, { rivalries, scores, error });
+}
+
+function scoreboardGet(ctx) {
+  sendHtml(ctx, 200, renderScoreboard(ctx));
+}
+
+function rivalrySides(ctx) {
+  const left = simOf(ctx.body.get("left"));
+  const right = simOf(ctx.body.get("right"));
+  if (!left || !right || left === right) return null;
+  return [left, right];
 }
 
 function rivalryPost(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "Hanna sets which companies compete.");
-  const left = simOf(ctx.body.get("left"));
-  const right = simOf(ctx.body.get("right"));
-  if (left && right && left !== right) setRivalry(left, right);
+  const pair = rivalrySides(ctx);
+  if (pair) setRivalry(pair[0], pair[1]);
   redirect(ctx, "/scoreboard?m=rivalry-set");
 }
 
 function rivalryClear(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "Hanna sets which companies compete.");
-  clearRivalry(simOf(ctx.body.get("left")), simOf(ctx.body.get("right")));
+  const pair = rivalrySides(ctx);
+  if (pair) clearRivalry(pair[0], pair[1]);
   redirect(ctx, "/scoreboard?m=rivalry-cleared");
+}
+
+function rivalryAssignment(ctx) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "Hanna sends the competition assignment.");
+  const pair = rivalrySides(ctx);
+  const assignment = cleanText(ctx.body.get("assignment"), 500);
+  if (!pair || !assignment || !setRivalryAssignment(pair[0], pair[1], assignment)) {
+    sendHtml(ctx, 400, renderScoreboard(ctx, "Set two companies competing, then write the simulation assignment."));
+    return;
+  }
+  redirect(ctx, "/scoreboard?m=assignment-sent");
+}
+
+function rivalryWinner(ctx) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Scoreboard", "Hanna announces the winner.");
+  const pair = rivalrySides(ctx);
+  const winner = simOf(ctx.body.get("winner"));
+  const note = cleanText(ctx.body.get("note"), 500);
+  if (!pair || !announceRivalryWinner(pair[0], pair[1], winner, note)) {
+    sendHtml(ctx, 400, renderScoreboard(ctx, "Pick one of the competing companies as the winner."));
+    return;
+  }
+  redirect(ctx, "/scoreboard?m=winner-announced");
 }
 
 function hrPost(ctx) {
@@ -1327,18 +1374,23 @@ function groupsGet(ctx) {
   sendHtml(ctx, 200, groupsPage(ctx, { groups: listVisibleGroups(ctx.user) }));
 }
 
+function joinRuleOf(value) {
+  return Object.hasOwn(JOIN_RULES, value) ? value : "";
+}
+
 function groupsPost(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   const name = cleanLine(ctx.body.get("name"), 80);
   const simulation = simOf(ctx.body.get("simulation"));
-  if (!name || !simulation || !canEnter(ctx.user, simulation)) {
+  const joinRule = joinRuleOf(ctx.body.get("join_rule"));
+  if (!name || !simulation || !canEnter(ctx.user, simulation) || !joinRule) {
     sendHtml(ctx, 400, groupsPage(ctx, {
       groups: listVisibleGroups(ctx.user),
-      error: "Name a group in a company you belong to.",
+      error: "Name the group, pick a company you belong to, and choose a join rule.",
     }));
     return;
   }
-  const id = createGroup({ name, simulation, createdBy: ctx.user.id });
+  const id = createGroup({ name, simulation, createdBy: ctx.user.id, joinRule });
   redirect(ctx, `/groups/${id}?m=group-made`);
 }
 
@@ -1363,6 +1415,9 @@ function groupView(ctx, group, error = "") {
     tasks: listGroupTasks(group.id),
     joined: isGroupMember(group.id, ctx.user.id),
     openings: listOpeningsForGroup(group.id),
+    lead: findUser(group.created_by),
+    requests: listGroupRequests(group.id),
+    asked: hasGroupRequest(group.id, ctx.user.id),
     error,
   });
 }
@@ -1577,12 +1632,67 @@ function groupGet(ctx, params) {
   sendHtml(ctx, 200, groupView(ctx, group));
 }
 
+function canReviewRequest(user, group) {
+  if (group.join_rule === "members") return isGroupMember(group.id, user.id);
+  if (group.join_rule === "lead") return user.id === group.created_by;
+  return false;
+}
+
 function groupJoin(ctx, params) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   const group = loadGroup(ctx, params);
   if (!group) return;
-  joinGroup(group.id, ctx.user.id);
-  redirect(ctx, `/groups/${group.id}?m=group-joined`);
+  if (isGroupMember(group.id, ctx.user.id)) {
+    redirect(ctx, `/groups/${group.id}?m=group-joined`);
+    return;
+  }
+  if ((group.join_rule || "open") === "open" || (group.join_rule === "lead" && ctx.user.id === group.created_by)) {
+    joinGroup(group.id, ctx.user.id);
+    clearGroupRequest(group.id, ctx.user.id);
+    redirect(ctx, `/groups/${group.id}?m=group-joined`);
+    return;
+  }
+  requestGroupJoin(group.id, ctx.user.id);
+  redirect(ctx, `/groups/${group.id}?m=group-asked`);
+}
+
+function groupRequestAccept(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const group = loadGroup(ctx, params);
+  if (!group) return;
+  const person = findUser(Number(ctx.body.get("user_id")));
+  if (!person || person.id === ctx.user.id || !canEnter(person, group.simulation) || !hasGroupRequest(group.id, person.id)) {
+    return sendHtml(ctx, 400, groupView(ctx, group, "Pick a member who asked to join this simulation group."));
+  }
+  if (!canReviewRequest(ctx.user, group)) {
+    return gate(ctx, 403, "Simulation group", "You cannot accept a join request for this simulation group.");
+  }
+  joinGroup(group.id, person.id);
+  clearGroupRequest(group.id, person.id);
+  redirect(ctx, `/groups/${group.id}?m=group-accepted`);
+}
+
+function groupRequestDecline(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const group = loadGroup(ctx, params);
+  if (!group) return;
+  const person = findUser(Number(ctx.body.get("user_id")));
+  if (!person || !hasGroupRequest(group.id, person.id)) {
+    return sendHtml(ctx, 400, groupView(ctx, group, "That join request is not here."));
+  }
+  if (!canReviewRequest(ctx.user, group)) {
+    return gate(ctx, 403, "Simulation group", "You cannot decline a join request for this simulation group.");
+  }
+  clearGroupRequest(group.id, person.id);
+  redirect(ctx, `/groups/${group.id}?m=group-declined`);
+}
+
+function groupRequestWithdraw(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const group = loadGroup(ctx, params);
+  if (!group) return;
+  clearGroupRequest(group.id, ctx.user.id);
+  redirect(ctx, `/groups/${group.id}?m=group-withdrawn`);
 }
 
 function groupLeave(ctx, params) {

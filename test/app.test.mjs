@@ -618,6 +618,73 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(boardPage.html, /Yapmark/);
     assert.match(boardPage.html, /Flinttable/);
     assert.match(boardPage.html, /versus/);
+    assert.match(boardPage.html, /work LARP/);
+    assert.equal(boardPage.html.includes('action="/rivalries/assignment"'), false);
+    const hannaBoard = await read(hanna, "/scoreboard");
+    assert.match(hannaBoard.html, /Send the competition assignment/);
+    assert.match(hannaBoard.html, /turn in progress reports by EOD/);
+    assert.match(hannaBoard.html, /Announce a winner/);
+    const early = await post(hanna, "/rivalries/assignment", {
+      csrf: csrfOf(hannaBoard.html),
+      left: "chartslate",
+      right: "yapmark",
+      assignment: "too soon",
+    });
+    assert.equal(early.status, 400);
+    const blank = await post(hanna, "/rivalries/assignment", {
+      csrf: csrfOf(hannaBoard.html),
+      left: "yapmark",
+      right: "flinttable",
+      assignment: "   ",
+    });
+    assert.equal(blank.status, 400);
+    const sneakAssign = await post(poe, "/rivalries/assignment", {
+      csrf: csrfOf(poeStill.html),
+      left: "yapmark",
+      right: "flinttable",
+      assignment: "Poe writes the assignment",
+    });
+    assert.equal(sneakAssign.status, 403);
+    const assigned = await post(hanna, "/rivalries/assignment", {
+      csrf: csrfOf(hannaBoard.html),
+      left: "flinttable",
+      right: "yapmark",
+      assignment: "turn in progress reports by EOD <report>",
+    });
+    assert.equal(assigned.status, 303);
+    const withAssignment = await read(moe, "/scoreboard");
+    assert.match(withAssignment.html, /turn in progress reports by EOD &lt;report&gt;/);
+    assert.match(withAssignment.html, /not a job/);
+    assert.equal(withAssignment.html.includes('action="/rivalries/winner"'), false);
+    const sneakWin = await post(moe, "/rivalries/winner", {
+      csrf: csrfOf(withAssignment.html),
+      left: "yapmark",
+      right: "flinttable",
+      winner: "yapmark",
+      note: "Moe picks",
+    });
+    assert.equal(sneakWin.status, 403);
+    const wrongWinner = await post(hanna, "/rivalries/winner", {
+      csrf: csrfOf(hannaBoard.html),
+      left: "yapmark",
+      right: "flinttable",
+      winner: "chartslate",
+      note: "not in this pair",
+    });
+    assert.equal(wrongWinner.status, 400);
+    const won = await post(hanna, "/rivalries/winner", {
+      csrf: csrfOf(hannaBoard.html),
+      left: "yapmark",
+      right: "flinttable",
+      winner: "flinttable",
+      note: "Flinttable brought the joke score home <win>",
+    });
+    assert.equal(won.status, 303);
+    const announced = await read(moe, "/scoreboard");
+    assert.match(announced.html, /is the announced winner/);
+    assert.match(announced.html, /Flinttable brought the joke score home &lt;win&gt;/);
+    assert.match(announced.html, /not a prize from an employer/);
+    assert.equal(announced.html.includes("Moe picks"), false);
 
     const table = await read(poe, "/flinttable/table");
     const idea = await post(poe, "/flinttable/ideas", {
@@ -681,6 +748,7 @@ describe("daymark", { concurrency: 1 }, () => {
       csrf: csrfOf(groups.html),
       name: "Hallway <table>",
       simulation: "flinttable",
+      join_rule: "open",
     });
     assert.equal(made.status, 303);
     const groupUrl = pathOnly(made.headers.get("location"));
@@ -796,6 +864,7 @@ describe("daymark", { concurrency: 1 }, () => {
       csrf: csrfOf(groups.html),
       name: "Spark keepers",
       simulation: "flinttable",
+      join_rule: "open",
     });
     assert.equal(made.status, 303);
     const groupUrl = pathOnly(made.headers.get("location"));
@@ -878,6 +947,139 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(noted.status, 303);
     const withNote = await read(ada, interviewUrl);
     assert.match(withNote.html, /A simulation note about the spark &lt;talk&gt;/);
+  });
+
+  test("group join rules stay inside the work LARP", async () => {
+    const ada = client();
+    const bea = client();
+    const cal = client();
+    const dee = client();
+    const adaDesk = await signup(ada, "Ada Rule", "ada-rule@example.com", "flinttable", "Table host", "Lead");
+    const beaDesk = await signup(bea, "Bea Rule", "bea-rule@example.com", "flinttable", "Table guest", "Member");
+    await signup(cal, "Cal Rule", "cal-rule@example.com", "flinttable", "Table guest", "Member");
+    await signup(dee, "Dee Rule", "dee-rule@example.com", "yapmark", "Other floor", "Outsider");
+    const beaId = Number(beaDesk.html.match(/data-user-id="(\d+)"/)[1]);
+    const calId = Number((await read(cal, "/desk")).html.match(/data-user-id="(\d+)"/)[1]);
+    assert.match(adaDesk.html, /work LARP/);
+
+    const groups = await read(ada, "/groups");
+    assert.match(groups.html, /Join rule/);
+    assert.match(groups.html, /Anyone in the company can join/);
+    assert.match(groups.html, /A current member must accept the request/);
+    assert.match(groups.html, /Only the team lead can accept the request/);
+    assert.match(groups.html, /not a job/);
+    const missing = await post(ada, "/groups", {
+      csrf: csrfOf(groups.html),
+      name: "No rule",
+      simulation: "flinttable",
+    });
+    assert.equal(missing.status, 400);
+
+    const made = await post(ada, "/groups", {
+      csrf: csrfOf(groups.html),
+      name: "Members gate <rule>",
+      simulation: "flinttable",
+      join_rule: "members",
+    });
+    assert.equal(made.status, 303);
+    const groupUrl = pathOnly(made.headers.get("location"));
+    const beaPage = await read(bea, groupUrl);
+    assert.match(beaPage.html, /Members gate &lt;rule&gt;/);
+    assert.match(beaPage.html, /Members accept/);
+    assert.match(beaPage.html, /Ask to join/);
+    assert.match(beaPage.html, /work LARP/);
+    assert.match(beaPage.html, /not a job/);
+    const asked = await post(bea, `${groupUrl}/join`, { csrf: csrfOf(beaPage.html) });
+    assert.equal(asked.status, 303);
+    const waiting = await read(bea, groupUrl);
+    assert.match(waiting.html, /Your join request is waiting/);
+    assert.equal(waiting.html.includes(`action="${groupUrl}/leave"`), false);
+    const withdrawn = await post(bea, `${groupUrl}/requests/withdraw`, { csrf: csrfOf(waiting.html) });
+    assert.equal(withdrawn.status, 303);
+    const afterWithdraw = await read(ada, groupUrl);
+    assert.equal(afterWithdraw.html.includes("Bea Rule"), false);
+    const askedAgain = await post(bea, `${groupUrl}/join`, { csrf: csrfOf((await read(bea, groupUrl)).html) });
+    assert.equal(askedAgain.status, 303);
+    const calPage = await read(cal, groupUrl);
+    const calAccept = await post(cal, `${groupUrl}/requests/accept`, {
+      csrf: csrfOf(calPage.html),
+      user_id: String(beaId),
+    });
+    assert.equal(calAccept.status, 403);
+    const selfAccept = await post(bea, `${groupUrl}/requests/accept`, {
+      csrf: csrfOf((await read(bea, groupUrl)).html),
+      user_id: String(beaId),
+    });
+    assert.equal(selfAccept.status, 400);
+    assert.equal((await read(bea, groupUrl)).html.includes(`action="${groupUrl}/leave"`), false);
+    const outsider = await dee.fetch(groupUrl);
+    assert.equal(outsider.status, 403);
+    const adaPage = await read(ada, groupUrl);
+    assert.match(adaPage.html, /Bea Rule/);
+    assert.match(adaPage.html, /Accept/);
+    const accepted = await post(ada, `${groupUrl}/requests/accept`, {
+      csrf: csrfOf(adaPage.html),
+      user_id: String(beaId),
+    });
+    assert.equal(accepted.status, 303);
+    const joined = await read(bea, groupUrl);
+    assert.match(joined.html, new RegExp(`action="${groupUrl}/leave"`));
+
+    const leadMade = await post(ada, "/groups", {
+      csrf: csrfOf((await read(ada, "/groups")).html),
+      name: "Lead gate",
+      simulation: "flinttable",
+      join_rule: "lead",
+    });
+    assert.equal(leadMade.status, 303);
+    const leadUrl = pathOnly(leadMade.headers.get("location"));
+    const calLead = await read(cal, leadUrl);
+    assert.match(calLead.html, /Team lead accepts/);
+    assert.match(calLead.html, /Only the team lead can accept the request/);
+    const calAsked = await post(cal, `${leadUrl}/join`, { csrf: csrfOf(calLead.html) });
+    assert.equal(calAsked.status, 303);
+    const beaLead = await read(bea, leadUrl);
+    const beaAccept = await post(bea, `${leadUrl}/requests/accept`, {
+      csrf: csrfOf(beaLead.html),
+      user_id: String(calId),
+    });
+    assert.equal(beaAccept.status, 403);
+    const adaLead = await read(ada, leadUrl);
+    const calAccepted = await post(ada, `${leadUrl}/requests/accept`, {
+      csrf: csrfOf(adaLead.html),
+      user_id: String(calId),
+    });
+    assert.equal(calAccepted.status, 303);
+    const beaAsked = await post(bea, `${leadUrl}/join`, { csrf: csrfOf((await read(bea, leadUrl)).html) });
+    assert.equal(beaAsked.status, 303);
+    const memberAccept = await post(cal, `${leadUrl}/requests/accept`, {
+      csrf: csrfOf((await read(cal, leadUrl)).html),
+      user_id: String(beaId),
+    });
+    assert.equal(memberAccept.status, 403);
+    assert.equal((await read(bea, leadUrl)).html.includes(`action="${leadUrl}/leave"`), false);
+    const leadAccepts = await post(ada, `${leadUrl}/requests/accept`, {
+      csrf: csrfOf((await read(ada, leadUrl)).html),
+      user_id: String(beaId),
+    });
+    assert.equal(leadAccepts.status, 303);
+    const beaIn = await read(bea, leadUrl);
+    assert.match(beaIn.html, new RegExp(`action="${leadUrl}/leave"`));
+
+    const openMade = await post(ada, "/groups", {
+      csrf: csrfOf((await read(ada, "/groups")).html),
+      name: "Open gate",
+      simulation: "flinttable",
+      join_rule: "open",
+    });
+    const openUrl = pathOnly(openMade.headers.get("location"));
+    const openPage = await read(bea, openUrl);
+    assert.match(openPage.html, /Join this group/);
+    const openJoin = await post(bea, `${openUrl}/join`, { csrf: csrfOf(openPage.html) });
+    assert.equal(openJoin.status, 303);
+    const openJoined = await read(bea, openUrl);
+    assert.match(openJoined.html, new RegExp(`action="${openUrl}/leave"`));
+    assert.match(openJoined.html, /Anyone in the company can join/);
   });
 });
 

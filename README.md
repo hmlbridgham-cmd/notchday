@@ -8,7 +8,9 @@ Yapmark, Flinttable, and Chartslate each have their own door, look, and login. N
 
 A signup email stays with one company. Members on that company team can say hello, use the company room, and share a file inside the app. Yapmark has a check-in board. Flinttable has pitches, comments, and votes. Chartslate’s room is for graphs.
 
-Members of a company can form a simulation group and other members of that company can join it themselves. Hanna can send simulation missions and tasks to a group. She can also send a company-wide simulation contest.
+Members of a company can form a simulation group. The creator picks one join rule: Open, so anyone in the company can join; Members accept, so a current member must accept the request; or Team lead accepts, so only the team lead can accept. The rule is inside the work LARP, not a job. Hanna can send simulation missions and tasks to a group. She can also send a company-wide simulation contest.
+
+On the scoreboard, Hanna sets companies to compete, sends a simulation competition assignment, and can later announce a winner. The tally is a joke score inside the work LARP, not a prize from an employer.
 
 A member of a group can post a simulation opening with a position title, a description, the group, and their simulation profile. Another member applies by a private simulation message, with a simulation resume or another note. The poster can interview them for that group or a simulation team. It is inside the work LARP, not real hiring and not a resume.
 
