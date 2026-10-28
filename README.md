@@ -37,7 +37,7 @@ npm test
 
 ## Deploy
 
-Render uses `render.yaml` from the open branch `cursor/daymark-simulation-studio-2caf`. The service runs Node 22, keeps the database, profile photos, and shared files on a disk, and marks the session cookie Secure. `RFAB_API_KEY` stays out of git. Set it in the Render dashboard only if you regenerate logos there.
+The public GitHub repo is https://github.com/hmlbridgham-cmd/notchday. Render uses `render.yaml` on branch `cursor/daymark-simulation-studio-2caf`. The service runs Node 22, keeps the database, profile photos, and shared files on a disk, and marks the session cookie Secure. `.env` stays out of git. Set the logo key in the Render dashboard only if you regenerate logos there.
 
 ## Logos
 
