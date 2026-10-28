@@ -13,7 +13,7 @@ const server = await start({ port: 0, host: "127.0.0.1", dbFile: join(dir, "daym
 const base = `http://127.0.0.1:${server.address().port}`;
 after(() => new Promise((resolve) => server.close(resolve)));
 
-const pages = ["/", "/copperline", "/kindling", "/quarry", "/support", "/login", "/signup"];
+const pages = ["/", "/yapmark", "/flinttable", "/chartslate", "/support", "/login", "/signup"];
 const banned = ["you were hired", "you're hired", "you are hired", "free trial", "free for 2 months", "subscribe now"];
 
 describe("daymark", { concurrency: 1 }, () => {
@@ -25,25 +25,30 @@ describe("daymark", { concurrency: 1 }, () => {
       for (const phrase of banned) assert.equal(html.toLowerCase().includes(phrase), false, `${path} ${phrase}`);
     }
     const home = await read(client(), "/");
-    for (const id of ["daymark", "copperline", "kindling", "quarry"]) {
+    for (const id of ["notchday", "yapmark", "flinttable", "chartslate"]) {
       assert.match(home.html, new RegExp(`data-logo="${id}"`));
     }
-    assert.match(home.html, /Hanna Bridgham, CEO of Daymark/);
-    assert.match(home.html, /Studio contact/);
-    assert.match(home.html, /253-241-7270/);
-    assert.match(home.html, /tel:\+12532417270/);
+    assert.match(home.html, /Hanna Bridgham, CEO of Notchday/);
+    assert.match(home.html, /separate company simulations/);
+    assert.match(home.html, /A Notchday simulation membership includes all three/);
+    assert.equal(home.html.includes("253-241-7270"), false);
+    assert.equal(home.html.includes("tel:"), false);
     assert.match(home.html, /fake-company simulation, not a real employer/);
     assert.equal(home.html.includes('id="call-app"'), false);
-    const copper = await read(client(), "/copperline");
-    assert.match(copper.html, /data-world="copperline"/);
-    assert.match(copper.html, /href="\/copperline\/login"/);
-    assert.match(copper.html, /href="\/copperline\/signup"/);
+    const copper = await read(client(), "/yapmark");
+    assert.match(copper.html, /data-world="yapmark"/);
+    assert.match(copper.html, /href="\/yapmark\/login"/);
+    assert.match(copper.html, /href="\/yapmark\/signup"/);
     assert.equal(copper.html.toLowerCase().includes("video"), false);
     const support = await read(client(), "/support");
-    assert.match(support.html, /no subscription/i);
-    assert.match(support.html, /no paywall/i);
     assert.match(support.html, /does not charge a card/i);
+    assert.match(support.html, /Notchday employee/);
     assert.equal(support.html.includes('name="card"'), false);
+    assert.equal(support.html.includes("253-241-7270"), false);
+    const membership = await read(client(), "/membership");
+    assert.match(membership.html, /Paid simulation membership/);
+    assert.match(membership.html, /not employment/i);
+    assert.equal(membership.html.includes('name="card"'), false);
   });
 
   test("chart renders public rows", () => {
@@ -57,7 +62,7 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(svg, /World Bank/);
   });
 
-  test("Hanna can log in as Daymark CEO and log out", async () => {
+  test("Hanna can log in as Notchday CEO and log out", async () => {
     const hanna = client();
     const desk = await submit(hanna, "/login", {
       email: SEED.email,
@@ -65,7 +70,7 @@ describe("daymark", { concurrency: 1 }, () => {
       next: "/desk",
     });
     assert.equal(desk.res.status, 200);
-    assert.match(desk.html, /CEO of Daymark/);
+    assert.match(desk.html, /CEO of Notchday/);
     assert.match(desk.html, /Hanna Bridgham/);
     assert.ok(desk.html.includes(DISCLAIMER));
     const gone = await post(hanna, "/logout", { csrf: csrfOf(desk.html) });
@@ -78,10 +83,10 @@ describe("daymark", { concurrency: 1 }, () => {
   test("members can practice teams, meetings, interviews, ideas, reports, and donations", async () => {
     const ada = client();
     const bea = client();
-    const adaDesk = await signup(ada, "Ada North", "ada@example.com", "copperline", "Floor listener", "Caller");
-    assert.match(adaDesk.html, /Practice profile/);
+    const adaDesk = await signup(ada, "Ada North", "ada@example.com", "yapmark", "Floor listener", "Caller");
+    assert.match(adaDesk.html, /Simulation profile/);
     assert.match(adaDesk.html, /Floor listener/);
-    const beaDesk = await signup(bea, "Bea South", "bea@example.com", "copperline", "Floor note taker", "Listener");
+    const beaDesk = await signup(bea, "Bea South", "bea@example.com", "yapmark", "Floor note taker", "Listener");
     assert.equal(beaDesk.res.status, 200);
 
     const adaId = Number(adaDesk.html.match(/data-user-id="(\d+)"/)[1]);
@@ -93,7 +98,7 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(made.status, 303);
     const teamUrl = pathOnly(made.headers.get("location"));
     const team = await read(ada, teamUrl);
-    assert.match(team.html, /Practice team/);
+    assert.match(team.html, /Simulation team/);
     assert.match(team.html, /Line &lt;practice&gt;/);
     const added = await post(ada, `${teamUrl}/members`, { csrf: csrfOf(team.html), user_id: String(beaId) });
     assert.equal(added.status, 303);
@@ -107,7 +112,7 @@ describe("daymark", { concurrency: 1 }, () => {
     });
     assert.equal(tasked.status, 303);
     const taskedPage = await read(ada, teamUrl);
-    assert.match(taskedPage.html, /Practice task · simulation/);
+    assert.match(taskedPage.html, /Simulation task/);
     assert.match(taskedPage.html, /Open the practice line/);
 
     const starts = stamp(10);
@@ -124,7 +129,7 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(meeting.status, 303);
     const meetingUrl = pathOnly(meeting.headers.get("location"));
     const room = await read(bea, meetingUrl);
-    assert.match(room.html, /Simulation meeting · practice/);
+    assert.match(room.html, /Simulation meeting/);
     assert.match(room.html, /Morning practice/);
     const joined = await post(bea, `${meetingUrl}/join`, { csrf: csrfOf(room.html) });
     assert.equal(joined.status, 303);
@@ -134,14 +139,14 @@ describe("daymark", { concurrency: 1 }, () => {
     const interviews = await read(bea, "/interviews");
     const requested = await post(bea, "/interviews", {
       csrf: csrfOf(interviews.html),
-      simulation: "copperline",
+      simulation: "yapmark",
       practice_role: "Floor listener",
       note: "I want to practice the call floor.",
     });
     assert.equal(requested.status, 303);
     const interviewUrl = pathOnly(requested.headers.get("location"));
     const open = await read(ada, interviewUrl);
-    assert.match(open.html, /Simulation interview · practice/);
+    assert.match(open.html, /Simulation interview/);
     const claimed = await post(ada, `${interviewUrl}/claim`, { csrf: csrfOf(open.html) });
     assert.equal(claimed.status, 303);
     const running = await read(ada, interviewUrl);
@@ -151,7 +156,7 @@ describe("daymark", { concurrency: 1 }, () => {
     });
     assert.equal(noted.status, 303);
     const withNote = await read(ada, interviewUrl);
-    assert.match(withNote.html, /Practice note/);
+    assert.match(withNote.html, /Simulation note/);
     const done = await post(ada, `${interviewUrl}/complete`, {
       csrf: csrfOf(withNote.html),
       feedback: "Practice complete. Clear voice and a calm pace on the floor.",
@@ -161,9 +166,18 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(finished.html, /Practice complete/);
     assert.equal(finished.html.toLowerCase().includes("hired"), false);
 
+    const gate = await read(ada, "/membership");
+    assert.match(gate.html, /Paid simulation membership/);
+    assert.equal(gate.html.includes('name="card"'), false);
+    const bought = await post(ada, "/membership", { csrf: csrfOf(gate.html) });
+    assert.equal(bought.status, 303);
+    const memberDesk = await read(ada, bought.headers.get("location"));
+    assert.match(memberDesk.html, /No card was charged/);
+    assert.match(memberDesk.html, /not employment/i);
+
     const switched = await post(ada, "/profile", {
       csrf: csrfOf((await read(ada, "/profile")).html),
-      simulation: "kindling",
+      simulation: "flinttable",
       practice_title: "Idea scriber",
       practice_role: "Table host",
     });
@@ -171,28 +185,28 @@ describe("daymark", { concurrency: 1 }, () => {
     const denied = await ada.fetch(teamUrl);
     assert.equal(denied.status, 403);
 
-    const table = await read(ada, "/kindling/table");
-    const idea = await post(ada, "/kindling/ideas", {
+    const table = await read(ada, "/flinttable/table");
+    const idea = await post(ada, "/flinttable/ideas", {
       csrf: csrfOf(table.html),
       title: "A quieter morning floor",
       pitch: "Practice a slower start to the call floor so new members can listen first.",
     });
     assert.equal(idea.status, 303);
     const ideaPage = await read(ada, pathOnly(idea.headers.get("location")));
-    assert.match(ideaPage.html, /Practice idea/);
+    assert.match(ideaPage.html, /Pitch/);
 
     const quarryProfile = await post(ada, "/profile", {
       csrf: csrfOf((await read(ada, "/profile")).html),
-      simulation: "quarry",
+      simulation: "chartslate",
       practice_title: "Chart maker",
       practice_role: "Report writer",
     });
     assert.equal(quarryProfile.status, 303);
-    const roomPage = await read(ada, "/quarry/room?dataset=population");
+    const roomPage = await read(ada, "/chartslate/room?dataset=population");
     assert.equal(roomPage.res.status, 200);
     assert.match(roomPage.html, /<svg/);
     assert.match(roomPage.html, /World Bank/);
-    const report = await post(ada, "/quarry/reports", {
+    const report = await post(ada, "/chartslate/reports", {
       csrf: csrfOf(roomPage.html),
       dataset: "population",
       city: "",
@@ -202,16 +216,20 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(report.status, 303);
     const reportUrl = pathOnly(report.headers.get("location"));
     const reportPage = await read(ada, reportUrl);
-    assert.match(reportPage.html, /Practice report/);
+    assert.match(reportPage.html, /Simulation report/);
     const shared = await post(ada, `${reportUrl}/share`, { csrf: csrfOf(reportPage.html) });
     assert.equal(shared.status, 303);
-    const seen = await read(bea, reportUrl);
+    const cal = client();
+    await signup(cal, "Cal East", "cal-east@example.com", "chartslate", "Graph pinner", "Chart host");
+    const seen = await read(cal, reportUrl);
     assert.equal(seen.res.status, 200);
     assert.match(seen.html, /Population practice note/);
+    const hidden = await read(bea, reportUrl);
+    assert.equal(hidden.res.status, 403);
 
     const guest = client();
     const support = await read(guest, "/support");
-    assert.match(support.html, /253-241-7270/);
+    assert.equal(support.html.includes("253-241-7270"), false);
     const donated = await post(guest, "/support", {
       csrf: csrfOf(support.html),
       amount: "15",
@@ -226,8 +244,8 @@ describe("daymark", { concurrency: 1 }, () => {
   test("call signaling rings another member", async () => {
     const one = client();
     const two = client();
-    const first = await signup(one, "Call One", "call-one@example.com", "copperline", "Caller", "Host");
-    const second = await signup(two, "Call Two", "call-two@example.com", "copperline", "Caller", "Guest");
+    const first = await signup(one, "Call One", "call-one@example.com", "yapmark", "Caller", "Host");
+    const second = await signup(two, "Call Two", "call-two@example.com", "yapmark", "Caller", "Guest");
     const firstId = Number(first.html.match(/data-user-id="(\d+)"/)[1]);
     const secondId = Number(second.html.match(/data-user-id="(\d+)"/)[1]);
     const left = openSocket(one.cookies.get("dm"));
@@ -252,21 +270,21 @@ describe("daymark", { concurrency: 1 }, () => {
     const cam = client();
     const dee = client();
     const eli = client();
-    const camDesk = await signup(cam, "Cam Lane", "cam-lane@example.com", "kindling", "Idea host", "Table voice");
-    const deeDesk = await signup(dee, "Dee Brook", "dee-brook@example.com", "kindling", "Idea guest", "Listener");
-    await signup(eli, "Eli West", "eli-west@example.com", "copperline", "Floor host", "Caller");
+    const camDesk = await signup(cam, "Cam Lane", "cam-lane@example.com", "flinttable", "Idea host", "Table voice");
+    const deeDesk = await signup(dee, "Dee Brook", "dee-brook@example.com", "flinttable", "Idea guest", "Listener");
+    await signup(eli, "Eli West", "eli-west@example.com", "yapmark", "Floor host", "Caller");
     const camId = Number(camDesk.html.match(/data-user-id="(\d+)"/)[1]);
     const deeId = Number(deeDesk.html.match(/data-user-id="(\d+)"/)[1]);
     const eliId = Number((await read(eli, "/desk")).html.match(/data-user-id="(\d+)"/)[1]);
 
-    assert.match(camDesk.html, /Practice chat/);
+    assert.match(camDesk.html, /Simulation chat/);
     assert.equal(camDesk.html.includes('id="call-app"'), false);
     assert.equal(camDesk.html.toLowerCase().includes("hired"), false);
 
     const members = await read(cam, "/members");
     assert.match(members.html, new RegExp(`href="/chats/${deeId}"`));
     assert.match(members.html, new RegExp(`href="/members/${deeId}"`));
-    assert.match(members.html, /Practice chat and practice meetings/);
+    assert.match(members.html, /Say hello/);
 
     const self = await cam.fetch(`/chats/${camId}`);
     assert.equal(self.status, 404);
@@ -278,8 +296,8 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(empty.status, 400);
 
     const thread = await read(cam, `/chats/${deeId}`);
-    assert.match(thread.html, /Practice chat · simulation/);
-    assert.match(thread.html, /Schedule a practice meeting with Dee Brook/);
+    assert.match(thread.html, /Simulation chat/);
+    assert.match(thread.html, /Schedule a simulation meeting with Dee Brook/);
     assert.equal(thread.html.includes('id="call-app"'), false);
     assert.equal(thread.html.toLowerCase().includes("video"), false);
     assert.equal(thread.html.toLowerCase().includes("hired"), false);
@@ -312,7 +330,7 @@ describe("daymark", { concurrency: 1 }, () => {
     const seen = await read(dee, `/chats/${camId}`);
     assert.match(seen.html, /Hello &lt;practice&gt;/);
     assert.match(seen.html, /See you on the simulation line/);
-    assert.match(seen.html, /Practice chat · simulation/);
+    assert.match(seen.html, /Simulation chat/);
     const reply = await post(dee, `/chats/${camId}`, {
       csrf: csrfOf(seen.html),
       body: "Practice reply received.",
@@ -331,8 +349,8 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(still.html.includes("stay out"), false);
 
     const form = await read(cam, `/members/${deeId}`);
-    assert.match(form.html, /Schedule a practice meeting with Dee Brook/);
-    assert.match(form.html, /Schedule practice meeting/);
+    assert.match(form.html, /Schedule a simulation meeting with Dee Brook/);
+    assert.match(form.html, /Schedule simulation meeting/);
     const bad = await post(cam, `/members/${deeId}/meeting`, {
       csrf: csrfOf(form.html),
       title: "Too short",
@@ -366,10 +384,10 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(scheduledPage.html, /https:\/\/zoom\.us\/j\/123456789/);
     const meetingUrl = pathOnly(scheduled.headers.get("location"));
     const invited = await read(dee, meetingUrl);
-    assert.match(invited.html, /Simulation meeting · practice/);
+    assert.match(invited.html, /Simulation meeting/);
     assert.match(invited.html, /Sync &lt;practice&gt;/);
     assert.match(invited.html, /Invited/);
-    assert.match(invited.html, /Zoom link for this practice meeting/);
+    assert.match(invited.html, /Zoom link for this simulation meeting/);
     const joined = await post(dee, `${meetingUrl}/join`, { csrf: csrfOf(invited.html) });
     assert.equal(joined.status, 303);
     const joinedPage = await read(dee, meetingUrl);
@@ -387,7 +405,7 @@ describe("daymark", { concurrency: 1 }, () => {
     const interviews = await read(dee, "/interviews");
     const requested = await post(dee, "/interviews", {
       csrf: csrfOf(interviews.html),
-      simulation: "kindling",
+      simulation: "flinttable",
       practice_role: "Table host",
       note: "Practice with a member who is in another simulation.",
     });
@@ -407,29 +425,29 @@ describe("daymark", { concurrency: 1 }, () => {
   });
 
   test("simulation doors keep practice addresses, photos, and punch time inside the app", async () => {
-    const door = await read(client(), "/kindling/signup");
-    assert.match(door.html, /data-world="kindling"/);
-    assert.match(door.html, /Join Kindling/);
-    assert.match(door.html, /name="simulation" value="kindling"/);
+    const door = await read(client(), "/flinttable/signup");
+    assert.match(door.html, /data-world="flinttable"/);
+    assert.match(door.html, /Join Flinttable/);
+    assert.match(door.html, /name="simulation" value="flinttable"/);
     assert.equal(door.html.includes("mailto:"), false);
 
     const nia = client();
-    const joined = await submit(nia, "/kindling/signup", {
+    const joined = await submit(nia, "/flinttable/signup", {
       name: "Nia Stone",
       email: "nia-stone@example.com",
       password: "practice-pass",
-      simulation: "copperline",
+      simulation: "yapmark",
       practice_title: "Table scribe",
       practice_role: "Note taker",
     });
-    assert.match(joined.html, /Kindling/);
-    assert.match(joined.html, /Practice time\. Not employment\./);
+    assert.match(joined.html, /Flinttable/);
+    assert.match(joined.html, /Simulation time\. Not employment\./);
     assert.match(joined.html, /Punched out/);
-    assert.match(joined.html, /0s in Kindling/);
+    assert.match(joined.html, /0s in Flinttable/);
 
     const profile = await read(nia, "/profile");
     assert.match(profile.html, /Simulation address/);
-    assert.match(profile.html, /nia\.stone@kindling\.daymark\.simulation/);
+    assert.match(profile.html, /nia\.stone@flinttable\.notchday\.simulation/);
     assert.match(profile.html, /only works inside the simulation/);
     assert.equal(profile.html.includes("mailto:"), false);
 
@@ -437,7 +455,7 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(punched.status, 303);
     const onClock = await read(nia, punched.headers.get("location"));
     assert.match(onClock.html, /Punched in/);
-    assert.match(onClock.html, /Practice time\. Not employment\./);
+    assert.match(onClock.html, /Simulation time\. Not employment\./);
 
     const png = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -470,16 +488,17 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(rejected.status, 400);
     assert.match(await rejected.text(), /PNG, JPEG, or WebP/);
 
-    const moved = await post(nia, "/quarry/login", { csrf: csrfOf(withPhoto.html) });
+    const moved = await post(nia, "/chartslate/login", { csrf: csrfOf(withPhoto.html) });
     assert.equal(moved.status, 303);
-    const quarryDesk = await read(nia, moved.headers.get("location"));
-    assert.match(quarryDesk.html, /This practice is now in that simulation/);
-    assert.match(quarryDesk.html, /Punched out/);
-    assert.match(quarryDesk.html, /0s in Quarry/);
-    const quarryProfile = await read(nia, "/profile");
-    assert.match(quarryProfile.html, /nia\.stone@quarry\.daymark\.simulation/);
-    assert.equal(quarryProfile.html.includes("nia.stone@kindling.daymark.simulation"), false);
-    assert.equal(quarryProfile.html.includes("mailto:"), false);
+    const lockedPage = await read(nia, moved.headers.get("location"));
+    assert.match(lockedPage.html, /locked to one company simulation/);
+    assert.match(lockedPage.html, /not employment/i);
+    const stillProfile = await read(nia, "/profile");
+    assert.match(stillProfile.html, /nia\.stone@flinttable\.notchday\.simulation/);
+    assert.equal(stillProfile.html.includes("chartslate.notchday.simulation"), false);
+    assert.equal(stillProfile.html.includes("mailto:"), false);
+    const stillDesk = await read(nia, "/desk");
+    assert.match(stillDesk.html, /Punched in/);
 
     const hanna = client();
     const hannaProfile = await submit(hanna, "/login", {
@@ -487,7 +506,136 @@ describe("daymark", { concurrency: 1 }, () => {
       password: SEED.password,
       next: "/profile",
     });
-    assert.equal(hannaProfile.html.includes("@daymark.simulation"), false);
+    assert.equal(hannaProfile.html.includes("@notchday.simulation"), false);
+    assert.match(hannaProfile.html, /<span class="ceo">/);
+  });
+
+  test("company rooms, complaints, files, votes, and the CEO lock", async () => {
+    const moe = client();
+    const noe = client();
+    const poe = client();
+    const moeDesk = await signup(moe, "Moe Talk", "moe-talk@example.com", "yapmark", "Floor voice", "Talker");
+    await signup(noe, "Noe Talk", "noe-talk@example.com", "yapmark", "Floor echo", "Listener");
+    const poeDesk = await signup(poe, "Poe Pitch", "poe-pitch@example.com", "flinttable", "Pitch voice", "Striker");
+    const poeId = Number(poeDesk.html.match(/data-user-id="(\d+)"/)[1]);
+    assert.equal(moeDesk.html.includes('<span class="ceo">'), false);
+
+    const sneaky = await post(poe, "/profile", {
+      csrf: csrfOf(poeDesk.html),
+      simulation: "yapmark",
+      practice_title: "Pitch voice",
+      practice_role: "Striker",
+      studio_role: "CEO",
+    });
+    assert.equal(sneaky.status, 303);
+    const poeStill = await read(poe, "/profile");
+    assert.match(poeStill.html, /locked to one company|Flinttable/);
+    assert.equal(poeStill.html.includes('<span class="ceo">'), false);
+    assert.match(poeStill.html, /poe\.pitch@flinttable\.notchday\.simulation/);
+
+    const room = await read(moe, "/yapmark/room");
+    const sent = await post(moe, "/yapmark/room", {
+      csrf: csrfOf(room.html),
+      body: "Office talk, and almost no deck.",
+    });
+    assert.equal(sent.status, 303);
+    const seen = await read(noe, "/yapmark/room");
+    assert.match(seen.html, /Office talk, and almost no deck/);
+    const outside = await read(poe, "/yapmark/room");
+    assert.equal(outside.html.includes("almost no deck"), false);
+    const fragment = await poe.fetch("/yapmark/room/messages?fragment=1");
+    assert.equal(fragment.status, 403);
+
+    const floor = await read(moe, "/yapmark/floor");
+    const checked = await post(moe, "/yapmark/checkin", {
+      csrf: csrfOf(floor.html),
+      working: "0",
+      body: "Not working on the deck.",
+    });
+    assert.equal(checked.status, 303);
+    const board = await read(noe, "/yapmark/floor");
+    assert.match(board.html, /Not working on the deck/);
+    assert.match(board.html, /Not working on it/);
+
+    const moeRoom = await read(moe, "/yapmark/room");
+    const shared = await postMultipart(moe, "/yapmark/files", csrfOf(moeRoom.html), {
+      name: "upload",
+      filename: "hello.txt",
+      type: "text/plain",
+      buffer: Buffer.from("hello from the room"),
+    });
+    assert.equal(shared.status, 303);
+    const withFile = await read(noe, "/yapmark/room");
+    const filePath = withFile.html.match(/href="(\/files\/\d+)"/)[1];
+    const downloaded = await noe.fetch(filePath);
+    assert.equal(downloaded.status, 200);
+    assert.match(downloaded.headers.get("content-disposition") || "", /attachment/);
+    assert.equal(await downloaded.text(), "hello from the room");
+    const blockedFile = await poe.fetch(filePath);
+    assert.equal(blockedFile.status, 403);
+    const htmlFile = await postMultipart(moe, "/yapmark/files", csrfOf(moeRoom.html), {
+      name: "upload",
+      filename: "page.html",
+      type: "text/html",
+      buffer: Buffer.from("<html><script>alert(1)</script></html>"),
+    });
+    assert.equal(htmlFile.status, 400);
+
+    const hanna = client();
+    await submit(hanna, "/login", { email: SEED.email, password: SEED.password, next: "/desk" });
+    const hannaId = Number((await read(hanna, "/desk")).html.match(/data-user-id="(\d+)"/)[1]);
+    const box = await read(moe, `/members/${hannaId}`);
+    assert.match(box.html, /Complaint box/);
+    assert.equal(box.html.includes("HR inbox"), false);
+    const bug = await post(moe, "/hr", {
+      csrf: csrfOf(box.html),
+      kind: "bug",
+      body: "The floor button sticks <bug>",
+    });
+    assert.equal(bug.status, 303);
+    const after = await read(moe, `/members/${hannaId}`);
+    assert.equal(after.html.includes("floor button sticks"), false);
+    const report = await post(moe, "/hr", {
+      csrf: csrfOf(after.html),
+      kind: "report",
+      about_user_id: String(poeId),
+      body: "Poe was harmful in the simulation.",
+    });
+    assert.equal(report.status, 303);
+    const inbox = await read(hanna, "/profile");
+    assert.match(inbox.html, /HR inbox/);
+    assert.match(inbox.html, /floor button sticks &lt;bug&gt;/);
+    assert.match(inbox.html, /Poe was harmful in the simulation/);
+    assert.match(inbox.html, /about Poe Pitch/);
+
+    const rival = await post(poe, "/rivalries", { csrf: csrfOf(poeStill.html), left: "yapmark", right: "flinttable" });
+    assert.equal(rival.status, 403);
+    const score = await read(hanna, "/scoreboard");
+    const set = await post(hanna, "/rivalries", { csrf: csrfOf(score.html), left: "yapmark", right: "flinttable" });
+    assert.equal(set.status, 303);
+    const boardPage = await read(moe, "/scoreboard");
+    assert.match(boardPage.html, /Yapmark/);
+    assert.match(boardPage.html, /Flinttable/);
+    assert.match(boardPage.html, /versus/);
+
+    const table = await read(poe, "/flinttable/table");
+    const idea = await post(poe, "/flinttable/ideas", {
+      csrf: csrfOf(table.html),
+      title: "A louder hallway",
+      pitch: "Pitch the hallway as the whole product.",
+    });
+    const ideaUrl = pathOnly(idea.headers.get("location"));
+    const ideaPage = await read(poe, ideaUrl);
+    const voted = await post(poe, `${ideaUrl}/vote`, { csrf: csrfOf(ideaPage.html) });
+    assert.equal(voted.status, 303);
+    const counted = await read(poe, ideaUrl);
+    assert.match(counted.html, /1 vote/);
+    const qui = client();
+    await signup(qui, "Qui Pitch", "qui-pitch@example.com", "flinttable", "Second pitch", "Voter");
+    const quiPage = await read(qui, ideaUrl);
+    await post(qui, `${ideaUrl}/vote`, { csrf: csrfOf(quiPage.html) });
+    const both = await read(poe, ideaUrl);
+    assert.match(both.html, /2 votes/);
   });
 });
 

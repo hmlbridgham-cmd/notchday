@@ -11,10 +11,10 @@ const STYLE =
   "A single flat geometric logo mark centered on a warm ivory square background. Printmaking style, thick confident shapes, no gradients, no shadows, no 3D, no letters, no numbers, no words, no watermark, no mockup. Generous empty margin around the symbol. Limited palette of ink black and one accent color.";
 
 const MARKS = [
-  ["daymark", `${STYLE} Accent copper. A sunrise reduced to a semicircle sitting on a short horizontal notch, like a day mark.`],
-  ["copperline", `${STYLE} Accent copper. A simplified telephone handset and a small rounded rectangle, touching, as one mark.`],
-  ["kindling", `${STYLE} Accent amber. A low table seen from the side with three short sparks rising.`],
-  ["quarry", `${STYLE} Accent slate blue. A cut stone block with a simple rising bar-chart groove in its face.`],
+  ["notchday", `${STYLE} Accent copper. Only one shape: a horizontal rectangle with a small triangular notch cut down from the top center. No second shape, no curve, no letter, no U, no smile.`],
+  ["yapmark", `${STYLE} Accent copper. Two overlapping speech balloons, simplified to flat shapes, with no letters inside.`],
+  ["flinttable", `${STYLE} Accent amber. A low table seen from the side with one flint spark above it.`],
+  ["chartslate", `${STYLE} Accent slate blue. A stone slab with three ascending bars cut into its face.`],
 ];
 
 loadEnv();

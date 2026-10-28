@@ -32,7 +32,7 @@ function startCall(root) {
     try { msg = JSON.parse(event.data); } catch { return; }
     handle(msg);
   });
-  socket.addEventListener("close", () => setStatus("The practice line disconnected."));
+  socket.addEventListener("close", () => setStatus("The simulation line disconnected."));
 
   root.addEventListener("click", (event) => {
     const ring = event.target.closest("[data-ring]");
@@ -49,7 +49,7 @@ function startCall(root) {
     partner = userId;
     callId = crypto.randomUUID();
     state = "outgoing";
-    setStatus(`Ringing ${nameOf(userId)} for a practice phone call.`);
+    setStatus(`Ringing ${nameOf(userId)} for a simulation phone call.`);
     send({ t: "ring", to: partner, callId, mode });
   }
 
@@ -76,14 +76,14 @@ function startCall(root) {
     if (state !== "incoming") return;
     send({ t: "decline", to: partner, callId });
     reset();
-    setStatus("You declined the practice call.");
+    setStatus("You declined the simulation call.");
   }
 
   function hangup() {
     if (kind === "room") {
       send({ t: "room-leave", meetingId });
       closeRoom();
-      setStatus("You left the practice call.");
+      setStatus("You left the simulation call.");
       return;
     }
     if (partner && callId) send({ t: "hangup", to: partner, callId });
@@ -101,19 +101,19 @@ function startCall(root) {
     stage.hidden = false;
     stage.classList.add("is-audio");
     send({ t: "room-join", meetingId });
-    setStatus("Joining the practice call.");
+    setStatus("Joining the simulation call.");
   }
 
   async function handle(msg) {
     if (msg.t === "online") return applyOnline(msg.ids || []);
-    if (msg.t === "replaced") return setStatus("This practice line is open in another tab.");
+    if (msg.t === "replaced") return setStatus("This simulation line is open in another tab.");
     if (msg.t === "chat") return onChat(msg);
     if (kind === "room") return handleRoom(msg);
     if (msg.t === "ring") return onRing(msg);
     if (msg.t === "accept" && msg.callId === callId) return onAccepted();
     if (msg.t === "decline" && msg.callId === callId) {
       reset();
-      setStatus(`${msg.fromName || "The other member"} declined the practice call.`);
+      setStatus(`${msg.fromName || "The other member"} declined the simulation call.`);
       return;
     }
     if (msg.t === "offer" && msg.callId === callId) return takeOffer(msg);
@@ -125,7 +125,7 @@ function startCall(root) {
     if (msg.t === "ice" && msg.callId === callId) return addIce(pc, msg.candidate);
     if (msg.t === "hangup" && msg.callId === callId) {
       reset();
-      setStatus("The other member ended the practice call.");
+      setStatus("The other member ended the simulation call.");
     }
   }
 
@@ -143,7 +143,7 @@ function startCall(root) {
     if (label) label.textContent = `Practice phone call from ${msg.fromName || nameOf(msg.from)}.`;
     if (incoming) incoming.hidden = false;
     openDock();
-    setStatus("Incoming practice call.");
+    setStatus("Incoming simulation call.");
   }
 
   function onChat(msg) {
@@ -156,7 +156,7 @@ function startCall(root) {
     if (!ping) return;
     const link = document.createElement("a");
     link.href = `/chats/${Number(msg.with) || ""}`;
-    link.textContent = `New practice message from ${msg.fromName || "a member"}.`;
+    link.textContent = `New simulation message from ${msg.fromName || "a member"}.`;
     ping.replaceChildren(link);
     ping.hidden = false;
     openDock();
@@ -289,8 +289,8 @@ function startCall(root) {
       if (label) label.textContent = nameOf(otherId);
     };
     conn.onconnectionstatechange = () => {
-      if (conn.connectionState === "connected") setStatus("Connected. This is a practice call.");
-      if (conn.connectionState === "failed") setStatus("The practice call could not connect.");
+      if (conn.connectionState === "connected") setStatus("Connected. This is a simulation call.");
+      if (conn.connectionState === "failed") setStatus("The simulation call could not connect.");
     };
     return conn;
   }
@@ -365,14 +365,14 @@ function startCall(root) {
   function failMedia(error) {
     reset();
     if (error && (error.name === "NotAllowedError" || error.name === "PermissionDeniedError")) {
-      setStatus("The browser blocked the microphone or camera. Allow them to place a practice call.");
+      setStatus("The browser blocked the microphone or camera. Allow them to place a simulation call.");
       return;
     }
     if (error && error.name === "NotFoundError") {
-      setStatus("No microphone or camera was found for this practice call.");
+      setStatus("No microphone or camera was found for this simulation call.");
       return;
     }
-    setStatus("The practice call could not use the microphone or camera.");
+    setStatus("The simulation call could not use the microphone or camera.");
   }
 
   function applyOnline(ids) {

@@ -10,5 +10,5 @@ if (live) {
     } catch {
       // The next poll can try again.
     }
-  }, String(live.getAttribute("data-live") || "").includes("/chats/") ? 3000 : 8000);
+  }, /\/chats\/|\/room/.test(String(live.getAttribute("data-live") || "")) ? 3000 : 8000);
 }

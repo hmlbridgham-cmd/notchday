@@ -1,14 +1,18 @@
-# Daymark
+# Notchday
 
-Daymark is a simulation studio. Hanna Bridgham is CEO. The studio contact number is 253-241-7270.
+Notchday is a simulation studio. Hanna Bridgham is the only CEO.
 
-Copperline, Kindling, and Quarry are simulations. They are not jobs, not employers, and not work history. Support is an optional donation. There is no subscription and no paywall.
+Yapmark, Flinttable, and Chartslate are separate company simulations. They are not jobs, not employers, and not work history. Each one has its own features and its own members. A Notchday employee option is a paid simulation membership, not employment. It includes all three companies. This app does not charge a card.
 
-Copperline, Kindling, and Quarry each have their own door, look, and login. Daymark stays in the footer as the studio.
+Yapmark, Flinttable, and Chartslate each have their own door, look, and login. Notchday stays in the footer as the studio.
 
-Members in the same simulation can send practice chat and schedule a practice meeting. A meeting can store an optional Zoom link that a member pastes in. There is no in-app video calling.
+A signup email stays with one company. Members on that company team can say hello, use the company room, and share a file inside the app. Yapmark has a check-in board. Flinttable has pitches and votes. Chartslate’s room is for graphs.
 
-A profile can show a photo, practice time for the current simulation, and a simulation address such as `name@kindling.daymark.simulation`. That address only works inside the app. Daymark does not send email.
+Members who share a company can send simulation chat and schedule a simulation meeting. A meeting can store an optional Zoom link that a member pastes in. There is no in-app video calling.
+
+A profile can show a photo, simulation time for the current company, and a simulation address such as `name@flinttable.notchday.simulation`. That address only works inside the app. Notchday does not send email.
+
+Hanna’s profile is the complaint box for bugs, issues, and reports about a harmful member.
 
 ## Run
 
@@ -33,7 +37,11 @@ Logo slots are on the pages. When `RFAB_API_KEY` is in the environment or in `.e
 npm run logos
 ```
 
-That follows `docs/rfab-api.md` and writes `public/logos/daymark.png`, `public/logos/copperline.png`, `public/logos/kindling.png`, and `public/logos/quarry.png`.
+That follows `docs/rfab-api.md` and writes `public/logos/notchday.png`, `public/logos/yapmark.png`, `public/logos/flinttable.png`, and `public/logos/chartslate.png`.
+
+## Names
+
+daymark.com, copperline.com, kindling.com, and quarry.com were already registered. The studio is Notchday. The companies are Yapmark, Flinttable, and Chartslate. notchday.com, yapmark.com, flinttable.com, and chartslate.com were available at Verisign RDAP when those names were chosen.
 
 ## Banner
 

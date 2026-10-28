@@ -51,14 +51,14 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; }
-body[data-world="copperline"] {
+body[data-world="yapmark"] {
   --paper: #f6ebe3;
   --paper-2: #f0d2c2;
   background:
     radial-gradient(circle at 8% 0%, rgba(196, 98, 45, 0.18), transparent 28rem),
     var(--paper);
 }
-body[data-world="kindling"] {
+body[data-world="flinttable"] {
   --paper: #fbf6ea;
   --paper-2: #f3e2b0;
   --copper: #b86e12;
@@ -68,7 +68,7 @@ body[data-world="kindling"] {
     radial-gradient(circle at 92% 0%, rgba(200, 146, 20, 0.22), transparent 26rem),
     var(--paper);
 }
-body[data-world="quarry"] {
+body[data-world="chartslate"] {
   --paper: #e7eef0;
   --paper-2: #d5e1e6;
   --white: #f7fbfb;
@@ -203,9 +203,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   color: inherit;
   text-decoration: none;
 }
-.sim-copperline { box-shadow: inset 4px 0 0 var(--copper); }
-.sim-kindling { box-shadow: inset 4px 0 0 var(--amber); }
-.sim-quarry { box-shadow: inset 4px 0 0 var(--stone); }
+.sim-yapmark { box-shadow: inset 4px 0 0 var(--copper); }
+.sim-flinttable { box-shadow: inset 4px 0 0 var(--amber); }
+.sim-chartslate { box-shadow: inset 4px 0 0 var(--stone); }
 .steps { margin: 0; padding-left: 1.2rem; }
 .steps li + li { margin-top: 0.35rem; }
 
@@ -291,7 +291,7 @@ textarea { min-height: 7rem; resize: vertical; }
 video { width: 100%; aspect-ratio: 16/10; background: #241e1a; border-radius: 12px; object-fit: cover; }
 #call-stage { display: grid; gap: 0.7rem; background: #241e1a; color: var(--paper); border-radius: 18px; padding: 0.8rem; }
 #call-stage.is-audio video { display: none; }
-#call-stage.is-audio .videos::before { content: "Phone practice"; font-family: var(--serif); font-size: 1.8rem; }
+#call-stage.is-audio .videos::before { content: "Simulation phone"; font-family: var(--serif); font-size: 1.8rem; }
 .incoming { display: grid; gap: 0.6rem; padding: 1rem; border: 1px solid var(--copper); border-radius: 16px; background: var(--white); }
 .incoming[hidden], #call-stage[hidden] { display: none; }
 .roster-item { display: grid; gap: 0.5rem; background: var(--white); border: 1px solid var(--line); border-radius: 18px; }
