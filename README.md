@@ -10,6 +10,8 @@ A signup email stays with one company. Members on that company team can say hell
 
 Members of a company can form a simulation group and other members of that company can join it themselves. Hanna can send simulation missions and tasks to a group. She can also send a company-wide simulation contest.
 
+A member of a group can post a simulation opening with a position title, a description, the group, and their simulation profile. Another member applies by a private simulation message, with a simulation resume or another note. The poster can interview them for that group or a simulation team. It is inside the work LARP, not real hiring and not a resume.
+
 Members who share a company can send simulation chat and schedule a simulation meeting. A meeting can store an optional Zoom link that a member pastes in. There is no in-app video calling.
 
 A profile can show a photo, simulation time for the current company, and a simulation address such as `name@flinttable.notchday.simulation`. That address only works inside the app. Notchday does not send email.

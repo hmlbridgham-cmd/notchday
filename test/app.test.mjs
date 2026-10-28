@@ -771,6 +771,114 @@ describe("daymark", { concurrency: 1 }, () => {
     const moeContests = await read(moe, "/contests");
     assert.equal(moeContests.html.includes("Quietest hallway"), false);
   });
+
+  test("simulation openings stay inside the work LARP", async () => {
+    const ada = client();
+    const bea = client();
+    const cal = client();
+    const adaDesk = await signup(ada, "Ada Board", "ada-board@example.com", "flinttable", "Table host", "Opener");
+    const beaDesk = await signup(bea, "Bea Board", "bea-board@example.com", "flinttable", "Table guest", "Applicant");
+    await signup(cal, "Cal Board", "cal-board@example.com", "yapmark", "Other floor", "Outsider");
+    const beaId = Number(beaDesk.html.match(/data-user-id="(\d+)"/)[1]);
+    assert.match(adaDesk.html, /Simulation openings/);
+
+    const blocked = await post(ada, "/openings", {
+      csrf: csrfOf(adaDesk.html),
+      group_id: "1",
+      title: "Spark keeper",
+      description: "Keep a spark on the table.",
+      ask: "Send a simulation resume.",
+    });
+    assert.equal(blocked.status, 403);
+
+    const groups = await read(ada, "/groups");
+    const made = await post(ada, "/groups", {
+      csrf: csrfOf(groups.html),
+      name: "Spark keepers",
+      simulation: "flinttable",
+    });
+    assert.equal(made.status, 303);
+    const groupUrl = pathOnly(made.headers.get("location"));
+    const groupId = groupUrl.split("/").pop();
+    const board = await read(ada, "/openings");
+    assert.match(board.html, /Simulation opening/);
+    assert.match(board.html, /work LARP/);
+    assert.match(board.html, /not real hiring/);
+    assert.match(board.html, /not a resume/);
+    const posted = await post(ada, "/openings", {
+      csrf: csrfOf(board.html),
+      group_id: groupId,
+      title: "Spark keeper <role>",
+      description: "Watch the spark and talk about it.",
+      ask: "A simulation resume or a short note.",
+    });
+    assert.equal(posted.status, 303);
+    const openingUrl = pathOnly(posted.headers.get("location"));
+    const opening = await read(bea, openingUrl);
+    assert.match(opening.html, /Spark keeper &lt;role&gt;/);
+    assert.match(opening.html, /Watch the spark and talk about it/);
+    assert.match(opening.html, /Spark keepers/);
+    assert.match(opening.html, /Ada Board/);
+    assert.match(opening.html, /Simulation profile/);
+    assert.match(opening.html, /work LARP/);
+    assert.match(opening.html, /not real hiring/);
+    assert.match(opening.html, /A simulation resume or a short note/);
+    const outside = await cal.fetch(openingUrl);
+    assert.equal(outside.status, 403);
+    const calBoard = await read(cal, "/openings");
+    assert.equal(calBoard.html.includes("Spark keeper"), false);
+
+    const applied = await post(bea, `${openingUrl}/apply`, {
+      csrf: csrfOf(opening.html),
+      body: "Simulation resume: I can talk about sparks <note>",
+    });
+    assert.equal(applied.status, 303);
+    const chat = await read(ada, `/chats/${beaId}`);
+    assert.match(chat.html, /Simulation resume: I can talk about sparks &lt;note&gt;/);
+    assert.match(chat.html, /work LARP/);
+    assert.match(chat.html, /not a resume/);
+    const sneak = await post(bea, `${openingUrl}/interview`, {
+      csrf: csrfOf((await read(bea, openingUrl)).html),
+      applicant_id: String(beaId),
+    });
+    assert.equal(sneak.status, 403);
+
+    const adaOpening = await read(ada, openingUrl);
+    assert.match(adaOpening.html, /Bea Board/);
+    const interview = await post(ada, `${openingUrl}/interview`, {
+      csrf: csrfOf(adaOpening.html),
+      applicant_id: String(beaId),
+    });
+    assert.equal(interview.status, 303);
+    const interviewUrl = pathOnly(interview.headers.get("location"));
+    const room = await read(ada, interviewUrl);
+    assert.match(room.html, /Simulation opening/);
+    assert.match(room.html, /work LARP/);
+    assert.match(room.html, /not a hire/);
+    const joined = await post(ada, `${interviewUrl}/group`, { csrf: csrfOf(room.html) });
+    assert.equal(joined.status, 303);
+    const group = await read(ada, groupUrl);
+    assert.match(group.html, /Bea Board/);
+
+    const teams = await read(ada, "/teams");
+    const team = await post(ada, "/teams", { csrf: csrfOf(teams.html), name: "Spark shift" });
+    assert.equal(team.status, 303);
+    const teamUrl = pathOnly(team.headers.get("location"));
+    const teamId = teamUrl.split("/").pop();
+    const again = await read(ada, interviewUrl);
+    assert.match(again.html, /Spark shift/);
+    const teamed = await post(ada, `${interviewUrl}/team`, { csrf: csrfOf(again.html), team_id: teamId });
+    assert.equal(teamed.status, 303);
+    const withBea = await read(ada, teamUrl);
+    assert.match(withBea.html, /Bea Board/);
+    const noted = await post(bea, `${interviewUrl}/notes`, {
+      csrf: csrfOf((await read(bea, interviewUrl)).html),
+      body: "A simulation note about the spark <talk>",
+    });
+    assert.equal(noted.status, 303);
+    const withNote = await read(ada, interviewUrl);
+    assert.match(withNote.html, /A simulation note about the spark &lt;talk&gt;/);
+  });
 });
 
 function client() {

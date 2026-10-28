@@ -10,10 +10,12 @@ import {
   addCheckin,
   addComplaint,
   addIdeaNote,
+  saveApplication,
   saveContestEntry,
   addInterviewNote,
   addMeetingNote,
   addMessage,
+  addOpeningInterviewNote,
   addRoomMessage,
   addSharedFile,
   addTeamMember,
@@ -27,6 +29,8 @@ import {
   createInterview,
   createMission,
   createMeeting,
+  createOpening,
+  createOpeningInterview,
   createReport,
   createSession,
   createTask,
@@ -35,8 +39,11 @@ import {
   deleteSession,
   findUser,
   findUserByEmail,
+  getApplication,
   getContest,
   getGroup,
+  getOpening,
+  getOpeningInterview,
   getGroupTask,
   groupMembers,
   getIdea,
@@ -56,6 +63,7 @@ import {
   latestCheckins,
   leaveGroup,
   leaveTeam,
+  listApplications,
   listContestEntries,
   listContests,
   listContestsFor,
@@ -65,7 +73,9 @@ import {
   listFiles,
   listGroupTasks,
   listMissions,
+  listOpeningsForGroup,
   listVisibleGroups,
+  listVisibleOpenings,
   listIdeas,
   listInterviews,
   listJoinedOtherMeetings,
@@ -81,6 +91,7 @@ import {
   meetingMembers,
   meetingMembership,
   meetingNotes,
+  openingInterviewNotes,
   openDb,
   openPunch,
   practiceMillis,
@@ -115,6 +126,9 @@ import {
   floorPage,
   groupPage,
   groupsPage,
+  openingInterviewPage,
+  openingPage,
+  openingsPage,
   homePage,
   ideaPage,
   ideasPage,
@@ -206,6 +220,15 @@ const routes = [
   ["POST", "/teams/:id/leave", teamLeave],
   ["POST", "/teams/:id/tasks", taskCreate],
   ["POST", "/tasks/:id", taskStatus],
+  ["GET", "/openings", openingsGet],
+  ["POST", "/openings", openingsPost],
+  ["GET", "/openings/:id", openingGet],
+  ["POST", "/openings/:id/apply", openingApply],
+  ["POST", "/openings/:id/interview", openingInterviewPost],
+  ["GET", "/opening-interviews/:id", openingInterviewGet],
+  ["POST", "/opening-interviews/:id/notes", openingInterviewNote],
+  ["POST", "/opening-interviews/:id/group", openingInterviewGroup],
+  ["POST", "/opening-interviews/:id/team", openingInterviewTeam],
   ["GET", "/groups", groupsGet],
   ["POST", "/groups", groupsPost],
   ["GET", "/groups/:id", groupGet],
@@ -1339,8 +1362,212 @@ function groupView(ctx, group, error = "") {
     missions: listMissions(group.id),
     tasks: listGroupTasks(group.id),
     joined: isGroupMember(group.id, ctx.user.id),
+    openings: listOpeningsForGroup(group.id),
     error,
   });
+}
+
+function joinedGroups(user) {
+  return listVisibleGroups(user).filter((group) => group.joined);
+}
+
+function openingsGet(ctx) {
+  if (!requireUser(ctx)) return;
+  const selected = String(ctx.query.get("group") || "");
+  sendHtml(ctx, 200, openingsPage(ctx, {
+    openings: listVisibleOpenings(ctx.user),
+    groups: joinedGroups(ctx.user),
+    selectedGroup: selected,
+  }));
+}
+
+function openingsPost(ctx) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const groups = joinedGroups(ctx.user);
+  const title = cleanLine(ctx.body.get("title"), 120);
+  const description = cleanText(ctx.body.get("description"), 2000);
+  const ask = cleanText(ctx.body.get("ask"), 2000);
+  const group = getGroup(Number(ctx.body.get("group_id")));
+  const member = group && isGroupMember(group.id, ctx.user.id) && canEnter(ctx.user, group.simulation);
+  if (!member) {
+    return sendHtml(ctx, 403, openingsPage(ctx, {
+      openings: listVisibleOpenings(ctx.user),
+      groups,
+      error: "Post a simulation opening only for a group you belong to.",
+    }));
+  }
+  if (!title || !description || !ask) {
+    return sendHtml(ctx, 400, openingsPage(ctx, {
+      openings: listVisibleOpenings(ctx.user),
+      groups,
+      selectedGroup: String(group.id),
+      error: "Add a position title, a description, and what the simulation message should include.",
+    }));
+  }
+  const id = createOpening({ groupId: group.id, posterId: ctx.user.id, title, description, ask });
+  redirect(ctx, `/openings/${id}?m=opening-posted`);
+}
+
+function loadOpening(ctx, params) {
+  const opening = getOpening(idOf(params));
+  if (!opening) {
+    gate(ctx, 404, "Not found", "That simulation opening is not here.");
+    return null;
+  }
+  if (!canEnter(ctx.user, opening.simulation)) {
+    gate(ctx, 403, "Simulation opening", "This simulation opening is for members of that company.");
+    return null;
+  }
+  return opening;
+}
+
+function openingView(ctx, opening, error = "") {
+  return openingPage(ctx, {
+    opening,
+    applications: ctx.user.id === opening.poster_id ? listApplications(opening.id) : [],
+    application: getApplication(opening.id, ctx.user.id),
+    error,
+  });
+}
+
+function openingGet(ctx, params) {
+  if (!requireUser(ctx)) return;
+  const opening = loadOpening(ctx, params);
+  if (!opening) return;
+  sendHtml(ctx, 200, openingView(ctx, opening));
+}
+
+function openingApply(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const opening = loadOpening(ctx, params);
+  if (!opening) return;
+  if (opening.poster_id === ctx.user.id) {
+    return sendHtml(ctx, 400, openingView(ctx, opening, "The poster does not apply to their own simulation opening."));
+  }
+  const poster = findUser(opening.poster_id);
+  if (!poster || !sharesCompany(ctx.user, poster)) {
+    return gate(ctx, 403, "Simulation opening", "Simulation messages stay with members who share a company.");
+  }
+  const body = cleanText(ctx.body.get("body"), 2000);
+  if (!body) return sendHtml(ctx, 400, openingView(ctx, opening, "Include a simulation resume or another note."));
+  const message = `Simulation application for "${opening.title}" in ${opening.group_name}.\nThis is a simulation opening inside the work LARP. It is not real hiring and not a resume.\n\n${body}`;
+  saveApplication({ openingId: opening.id, applicantId: ctx.user.id, body });
+  addMessage({
+    simulation: opening.simulation,
+    senderId: ctx.user.id,
+    recipientId: poster.id,
+    body: message,
+  });
+  notifyUser(poster.id, { t: "chat", with: ctx.user.id, fromName: ctx.user.name });
+  redirect(ctx, `/openings/${opening.id}?m=opening-applied`);
+}
+
+function openingInterviewPost(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const opening = loadOpening(ctx, params);
+  if (!opening) return;
+  if (opening.poster_id !== ctx.user.id) {
+    return gate(ctx, 403, "Simulation opening", "The poster interviews applicants for this simulation opening.");
+  }
+  const applicant = findUser(Number(ctx.body.get("applicant_id")));
+  const application = applicant ? getApplication(opening.id, applicant.id) : null;
+  if (!applicant || !application || !sharesCompany(ctx.user, applicant)) {
+    return sendHtml(ctx, 400, openingView(ctx, opening, "Pick a member who sent a simulation message."));
+  }
+  const id = createOpeningInterview({ openingId: opening.id, applicantId: applicant.id, posterId: ctx.user.id });
+  addMessage({
+    simulation: opening.simulation,
+    senderId: ctx.user.id,
+    recipientId: applicant.id,
+    body: `Simulation interview for "${opening.title}" in ${opening.group_name}.\nThis is inside the work LARP. It is not a hire.`,
+  });
+  notifyUser(applicant.id, { t: "chat", with: ctx.user.id, fromName: ctx.user.name });
+  redirect(ctx, `/opening-interviews/${id}?m=opening-interview`);
+}
+
+function loadOpeningInterview(ctx, params) {
+  const interview = getOpeningInterview(idOf(params));
+  if (!interview) {
+    gate(ctx, 404, "Not found", "That simulation interview is not here.");
+    return null;
+  }
+  if (interview.poster_id !== ctx.user.id && interview.applicant_id !== ctx.user.id) {
+    gate(ctx, 403, "Simulation opening", "This simulation interview is for the poster and the applicant.");
+    return null;
+  }
+  const opening = getOpening(interview.opening_id);
+  if (!opening) {
+    gate(ctx, 404, "Not found", "That simulation opening is not here.");
+    return null;
+  }
+  return { interview, opening };
+}
+
+function openingInterviewView(ctx, interview, opening, error = "") {
+  const poster = findUser(interview.poster_id);
+  const applicant = findUser(interview.applicant_id);
+  const teams = listTeamsFor(ctx.user.id).filter((team) => team.simulation === opening.simulation);
+  return openingInterviewPage(ctx, {
+    interview,
+    opening,
+    poster,
+    applicant,
+    application: getApplication(opening.id, interview.applicant_id),
+    notes: openingInterviewNotes(interview.id),
+    teams: ctx.user.id === interview.poster_id ? teams : [],
+    inGroup: isGroupMember(opening.group_id, interview.applicant_id),
+    error,
+  });
+}
+
+function openingInterviewGet(ctx, params) {
+  if (!requireUser(ctx)) return;
+  const loaded = loadOpeningInterview(ctx, params);
+  if (!loaded) return;
+  sendHtml(ctx, 200, openingInterviewView(ctx, loaded.interview, loaded.opening));
+}
+
+function openingInterviewNote(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const loaded = loadOpeningInterview(ctx, params);
+  if (!loaded) return;
+  const body = cleanText(ctx.body.get("body"), 2000);
+  if (!body) {
+    return sendHtml(ctx, 400, openingInterviewView(ctx, loaded.interview, loaded.opening, "Write a simulation note."));
+  }
+  addOpeningInterviewNote(loaded.interview.id, ctx.user.id, body);
+  redirect(ctx, `/opening-interviews/${loaded.interview.id}?m=note-saved`);
+}
+
+function openingInterviewGroup(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const loaded = loadOpeningInterview(ctx, params);
+  if (!loaded) return;
+  if (loaded.interview.poster_id !== ctx.user.id) {
+    return gate(ctx, 403, "Simulation opening", "The poster adds someone to the simulation group.");
+  }
+  const applicant = findUser(loaded.interview.applicant_id);
+  if (!applicant || !canEnter(applicant, loaded.opening.simulation)) {
+    return gate(ctx, 403, "Simulation opening", "That member is not in this company simulation.");
+  }
+  joinGroup(loaded.opening.group_id, applicant.id);
+  redirect(ctx, `/opening-interviews/${loaded.interview.id}?m=opening-joined`);
+}
+
+function openingInterviewTeam(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const loaded = loadOpeningInterview(ctx, params);
+  if (!loaded) return;
+  if (loaded.interview.poster_id !== ctx.user.id) {
+    return gate(ctx, 403, "Simulation opening", "The poster adds someone to a simulation team.");
+  }
+  const team = getTeam(Number(ctx.body.get("team_id")));
+  const applicant = findUser(loaded.interview.applicant_id);
+  if (!team || team.simulation !== loaded.opening.simulation || !isTeamMember(team.id, ctx.user.id) || !applicant || !canEnter(applicant, team.simulation)) {
+    return sendHtml(ctx, 400, openingInterviewView(ctx, loaded.interview, loaded.opening, "Pick a simulation team you belong to in this company."));
+  }
+  addTeamMember(team.id, applicant.id);
+  redirect(ctx, `/opening-interviews/${loaded.interview.id}?m=opening-teamed`);
 }
 
 function groupGet(ctx, params) {
