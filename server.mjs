@@ -537,8 +537,8 @@ function accountError(values, password) {
   if (password.length < 8) return "Use at least 8 characters for the password.";
   if (password.length > 200) return "That password is too long.";
   if (!values.simulation) return "Pick a simulation.";
-  if (!values.practice_title) return "Enter a simulation title.";
-  if (!values.practice_role) return "Enter a simulation role.";
+  if (!values.practice_title) return "Enter a job title.";
+  if (!values.practice_role) return "Enter a job role.";
   return "";
 }
 
@@ -659,7 +659,7 @@ function profilePost(ctx) {
   };
   if (!values.simulation || !values.practice_title || !values.practice_role) {
     sendHtml(ctx, 400, profilePage(ctx, {
-      error: "Pick a company simulation, a simulation title, and a simulation role.",
+      error: "Pick a company simulation, a job title, and a job role.",
       values,
       complaints: isCeo(ctx.user) ? listComplaints() : null,
       ...practiceClock(ctx.user),
@@ -1206,7 +1206,7 @@ function interviewCreate(ctx) {
   if (!simulation || !practiceRole || !canEnter(ctx.user, simulation)) {
     sendHtml(ctx, 400, interviewsPage(ctx, {
       interviews: listInterviews(),
-      error: "Pick a company you belong to and name the simulation role.",
+      error: "Pick a company you belong to and name the job role.",
     }));
     return;
   }
