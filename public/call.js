@@ -140,7 +140,8 @@ function startCall(root) {
     callId = msg.callId;
     mode = "audio";
     const label = document.querySelector("#incoming-label");
-    if (label) label.textContent = `Practice phone call from ${msg.fromName || nameOf(msg.from)}.`;
+    const who = [msg.fromTeam, msg.fromName || nameOf(msg.from)].filter(Boolean).join(" · ");
+    if (label) label.textContent = `Practice phone call from ${who}.`;
     if (incoming) incoming.hidden = false;
     openDock();
     setStatus("Incoming simulation call.");
@@ -156,7 +157,8 @@ function startCall(root) {
     if (!ping) return;
     const link = document.createElement("a");
     link.href = `/chats/${Number(msg.with) || ""}`;
-    link.textContent = `New simulation message from ${msg.fromName || "a member"}.`;
+    const who = [msg.fromTeam, msg.fromName || "a member"].filter(Boolean).join(" · ");
+    link.textContent = `New simulation message from ${who}.`;
     ping.replaceChildren(link);
     ping.hidden = false;
     openDock();

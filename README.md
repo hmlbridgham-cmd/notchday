@@ -1,24 +1,22 @@
 # Notchday
 
-Notchday is a simulation studio and a work LARP (live action role play). Hanna Bridgham is the only CEO. You play a company simulation. It is not a job.
+Notchday is a simulation studio and a work LARP (live action role play). The only CEO is shown as the CEO, the mysterious leader. You play a company simulation. It is not a job.
 
-Yapmark, Flinttable, and Chartslate are separate company simulations. They are not jobs, not employers, and not work history. Each one has its own features and its own members. A Notchday employee option is a paid simulation membership, not employment. It includes all three companies. This app does not charge a card. Support the project opens https://rfab.ai/tip/f826f793-6969-4917-93bd-9a2275ad2943.
+Yapmark Corp., Flinttable Inc., and Chartslate Ltd. are separate company teams. They are not jobs, not employers, and not work history. Signup pledges permanently to one of those three. That pledge is the member's main purpose. Notchday is its own private team, for subscribers or invited members. A normal signup cannot join Notchday. This app does not charge a card. Support the project opens https://rfab.ai/tip/f826f793-6969-4917-93bd-9a2275ad2943.
 
-Yapmark, Flinttable, and Chartslate each have their own door, look, and login. Notchday stays in the footer as the studio.
+Members of every team can use the tools and groups. Teams can compete, and the work stays collaborative. Yapmark has a check-in board. Flinttable has pitches, comments, and votes. Chartslate’s room is for graphs. A profile, chat, and message show the other person's team logo and team name. A Notchday member also shows the Notchday logo.
 
-A signup email stays with one company. Members on that company team can say hello, use the company room, and share a file inside the app. Yapmark has a check-in board. Flinttable has pitches, comments, and votes. Chartslate’s room is for graphs.
+Members of any team can form a simulation group. The creator picks one join rule: Open, so anyone from any team can join; Members accept, so a current member must accept the request; or Team lead accepts, so only the team lead can accept. The rule is inside the work LARP, not a job. The CEO can send simulation missions and tasks to a group, and can also send a company-wide simulation contest.
 
-Members of a company can form a simulation group. The creator picks one join rule: Open, so anyone in the company can join; Members accept, so a current member must accept the request; or Team lead accepts, so only the team lead can accept. The rule is inside the work LARP, not a job. Hanna can send simulation missions and tasks to a group. She can also send a company-wide simulation contest.
-
-On the scoreboard, Hanna sets companies to compete, sends a simulation competition assignment, and can later announce a winner. The tally is a joke score inside the work LARP, not a prize from an employer.
+On the scoreboard, the CEO sets companies to compete, sends a simulation competition assignment, and can later announce a winner. The tally is a joke score inside the work LARP, not a prize from an employer.
 
 A member of a group can post a simulation opening with a position title, a description, the group, and their simulation profile. Another member applies by a private simulation message, with a simulation resume or another note. The poster can interview them for that group or a simulation team. It is inside the work LARP, not real hiring and not a resume.
 
-Members who share a company can send simulation chat and schedule a simulation meeting. A meeting can store an optional Zoom link that a member pastes in. There is no in-app video calling.
+Members can send simulation chat and schedule a simulation meeting across teams. A meeting can store an optional Zoom link that a member pastes in. There is no in-app video calling.
 
 A profile can show a photo, simulation time for the current company, and a simulation address such as `name@flinttable.notchday.simulation`. That address only works inside the app. Notchday does not send email.
 
-Hanna’s profile is the complaint box for bugs, issues, and reports about a harmful member.
+The CEO profile is the complaint box for bugs, issues, and reports about a harmful member. Bug reports are stored for that account.
 
 ## Run
 

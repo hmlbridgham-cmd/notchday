@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { extname, join, normalize, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { clearCookie, hashPassword, parseCookies, sessionCookie, tokensEqual, verifyPassword } from "./lib/auth.mjs";
-import { belongsTo, canEnter, isCeo, sharesCompany } from "./lib/access.mjs";
+import { belongsTo, canEnter, isCeo, isNotchdayMember, sharesCompany, teamLabel } from "./lib/access.mjs";
 import { JOIN_RULES, publicName, SEED, SIMS, TIP_URL } from "./lib/copy.mjs";
 import {
   activityScore,
@@ -93,6 +93,7 @@ import {
   listTasksForTeam,
   listTasksForUser,
   listTeamsFor,
+  listStudioMembers,
   listUsers,
   listVisibleReports,
   meetingMembers,
@@ -197,6 +198,7 @@ const routes = [
   ["GET", "/chartslate", (ctx) => sendHtml(ctx, 200, simPage(ctx, "chartslate"))],
   ["GET", "/membership", membershipGet],
   ["POST", "/membership", membershipPost],
+  ["POST", "/membership/invite", membershipInvite],
   ["GET", "/scoreboard", scoreboardGet],
   ["POST", "/rivalries", rivalryPost],
   ["POST", "/rivalries/clear", rivalryClear],
@@ -541,7 +543,7 @@ function accountError(values, password) {
   if (!validEmail(values.email)) return "Enter a valid email.";
   if (password.length < 8) return "Use at least 8 characters for the password.";
   if (password.length > 200) return "That password is too long.";
-  if (!values.simulation) return "Pick a simulation.";
+  if (!values.simulation) return "Pledge to one public team: Yapmark Corp., Flinttable Inc., or Chartslate Ltd. Notchday is invite-only or for subscribers.";
   if (!values.practice_title) return "Enter a job title.";
   if (!values.practice_role) return "Enter a job role.";
   return "";
@@ -656,19 +658,14 @@ function profileExtras(ctx) {
 
 function profilePost(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
-  const requested = simOf(ctx.body.get("simulation"));
-  const locked = Boolean(ctx.user.simulation) && ctx.user.membership !== "all" && !isCeo(ctx.user);
-  if (locked && requested && requested !== ctx.user.simulation) {
-    return redirect(ctx, "/membership?m=locked");
-  }
   const values = {
-    simulation: locked ? ctx.user.simulation : requested,
+    simulation: ctx.user.simulation,
     practice_title: cleanLine(ctx.body.get("practice_title"), 80),
     practice_role: cleanLine(ctx.body.get("practice_role"), 80),
   };
-  if (!values.simulation || !values.practice_title || !values.practice_role) {
+  if (!values.practice_title || !values.practice_role) {
     sendHtml(ctx, 400, profilePage(ctx, {
-      error: "Pick a company simulation, a job title, and a job role.",
+      error: "Enter a job title and a job role. The team pledge stays put.",
       values,
       ...profileExtras(ctx),
     }));
@@ -724,8 +721,8 @@ function chatPost(ctx, params) {
     recipientId: peer.id,
     body,
   });
-  notifyUser(peer.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user) });
-  notifyUser(ctx.user.id, { t: "chat", with: peer.id, fromName: publicName(peer) });
+  notifyUser(peer.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user), fromTeam: teamLabel(ctx.user) });
+  notifyUser(ctx.user.id, { t: "chat", with: peer.id, fromName: publicName(peer), fromTeam: teamLabel(peer) });
   redirect(ctx, `/chats/${peer.id}?m=chat-sent`);
 }
 
@@ -837,7 +834,7 @@ function teamGet(ctx, params) {
 
 function teamView(ctx, team, error = "") {
   const members = teamMembers(team.id);
-  const others = listCompany(team.simulation).filter((user) => !members.some((member) => member.id === user.id) && user.id !== ctx.user.id);
+  const others = listStudioMembers().filter((user) => !members.some((member) => member.id === user.id) && user.id !== ctx.user.id);
   return teamPage(ctx, { team, members, others, tasks: listTasksForTeam(team.id), error });
 }
 
@@ -900,9 +897,7 @@ function calendar(ctx) {
   const prefix = `${year}-${String(month).padStart(2, "0")}`;
   const meetings = listMeetingsForMonth(ctx.user.simulation, prefix);
   const others = listJoinedOtherMeetings(ctx.user.id, ctx.user.simulation, prefix);
-  const members = ctx.user.simulation
-    ? listCompany(ctx.user.simulation).filter((member) => member.id !== ctx.user.id)
-    : [];
+  const members = listStudioMembers().filter((member) => member.id !== ctx.user.id);
   sendHtml(ctx, 200, calendarPage(ctx, {
     year,
     month,
@@ -925,7 +920,7 @@ function meetingCreate(ctx) {
   const zoom = cleanZoomLink(ctx.body.get("zoom_link"));
   const error = meetingError(values) || (zoom === null ? "Paste an https Zoom link, or leave it blank." : "");
   if (error) return sendHtml(ctx, 400, calendarWith(ctx, error, { ...values, zoom_link: String(ctx.body.get("zoom_link") || "") }));
-  const allowed = new Set(listCompany(ctx.user.simulation).map((member) => member.id));
+  const allowed = new Set(listStudioMembers().map((member) => member.id));
   const inviteIds = ctx.body
     .getAll("with")
     .map(Number)
@@ -955,7 +950,7 @@ function calendarWith(ctx, error, values) {
     cells: monthCells(year, month, meetings),
     meetings,
     others: [],
-    members: listCompany(ctx.user.simulation).filter((member) => member.id !== ctx.user.id),
+    members: listStudioMembers().filter((member) => member.id !== ctx.user.id),
     error,
     values,
   });
@@ -1305,14 +1300,37 @@ function interviewComplete(ctx, params) {
   redirect(ctx, `/interviews/${interview.id}?m=interview-complete`);
 }
 
+function notchdayRoster() {
+  return listUsers().filter((user) => isNotchdayMember(user));
+}
+
 function membershipGet(ctx) {
-  sendHtml(ctx, 200, membershipPage(ctx));
+  sendHtml(ctx, 200, membershipPage(ctx, { members: notchdayRoster() }));
 }
 
 function membershipPost(ctx) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  if (!ctx.user.simulation && !isCeo(ctx.user)) return redirect(ctx, "/signup");
   setMembership(ctx.user.id, "all");
   redirect(ctx, "/desk?m=membership");
+}
+
+function membershipInvite(ctx) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  if (!isNotchdayMember(ctx.user)) {
+    return gate(ctx, 403, "Notchday team", "Only the Notchday team can invite someone.");
+  }
+  const email = cleanLine(ctx.body.get("email"), 120).toLowerCase();
+  const person = findUserByEmail(email);
+  if (!person || person.id === ctx.user.id || !person.simulation) {
+    sendHtml(ctx, 400, membershipPage(ctx, {
+      members: notchdayRoster(),
+      error: "Invite a member who already pledged to a public team.",
+    }));
+    return;
+  }
+  setMembership(person.id, "all");
+  redirect(ctx, "/membership?m=invited");
 }
 
 function renderScoreboard(ctx, error = "") {
@@ -1544,7 +1562,7 @@ function openingApply(ctx, params) {
     recipientId: poster.id,
     body: message,
   });
-  notifyUser(poster.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user) });
+  notifyUser(poster.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user), fromTeam: teamLabel(ctx.user) });
   redirect(ctx, `/openings/${opening.id}?m=opening-applied`);
 }
 
@@ -1567,7 +1585,7 @@ function openingInterviewPost(ctx, params) {
     recipientId: applicant.id,
     body: `Simulation interview for "${opening.title}" in ${opening.group_name}.\nThis is inside the work LARP. It is not a hire.`,
   });
-  notifyUser(applicant.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user) });
+  notifyUser(applicant.id, { t: "chat", with: ctx.user.id, fromName: publicName(ctx.user), fromTeam: teamLabel(ctx.user) });
   redirect(ctx, `/opening-interviews/${id}?m=opening-interview`);
 }
 

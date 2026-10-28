@@ -44,8 +44,8 @@ describe("daymark", { concurrency: 1 }, () => {
     const css = await (await client().fetch("/app.css")).text();
     assert.match(css, /\.account a\.button/);
     assert.match(css, /color: var\(--paper\)/);
-    assert.match(home.html, /separate company simulations/);
-    assert.match(home.html, /A Notchday simulation membership includes all three/);
+    assert.match(home.html, /separate company teams/);
+    assert.match(home.html, /A normal signup cannot join Notchday/);
     assert.equal(home.html.includes("253-241-7270"), false);
     assert.equal(home.html.includes("tel:"), false);
     assert.match(home.html, /fake-company simulation, not a real employer/);
@@ -57,14 +57,16 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(copper.html.toLowerCase().includes("video"), false);
     const support = await read(client(), "/support");
     assert.match(support.html, /does not charge a card/i);
-    assert.match(support.html, /Notchday employee/);
+    assert.match(support.html, /Notchday team/);
     assert.ok(support.html.includes(TIP_URL));
     assert.equal(support.html.includes('action="/support"'), false);
     assert.equal(support.html.includes('name="amount"'), false);
     assert.equal(support.html.includes('name="card"'), false);
     assert.equal(support.html.includes("253-241-7270"), false);
     const membership = await read(client(), "/membership");
-    assert.match(membership.html, /Paid simulation membership/);
+    assert.match(membership.html, /Private team/);
+    assert.match(membership.html, /invite-only or for subscribers/);
+    assert.match(membership.html, /cannot join Notchday/);
     assert.match(membership.html, /not employment/i);
     assert.equal(membership.html.includes('name="card"'), false);
   });
@@ -187,7 +189,8 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(finished.html.toLowerCase().includes("hired"), false);
 
     const gate = await read(ada, "/membership");
-    assert.match(gate.html, /Paid simulation membership/);
+    assert.match(gate.html, /Subscribe to the Notchday team/);
+    assert.match(gate.html, /does not charge a card/i);
     assert.equal(gate.html.includes('name="card"'), false);
     const bought = await post(ada, "/membership", { csrf: csrfOf(gate.html) });
     assert.equal(bought.status, 303);
@@ -202,8 +205,12 @@ describe("daymark", { concurrency: 1 }, () => {
       practice_role: "Table host",
     });
     assert.equal(switched.status, 303);
+    const stayed = await read(ada, "/profile");
+    assert.match(stayed.html, /Yapmark Corp/);
+    assert.match(stayed.html, /data-team="yapmark"/);
+    assert.match(stayed.html, /permanent/);
     const denied = await ada.fetch(teamUrl);
-    assert.equal(denied.status, 403);
+    assert.equal(denied.status, 200);
 
     const table = await read(ada, "/flinttable/table");
     const idea = await post(ada, "/flinttable/ideas", {
@@ -245,7 +252,10 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(seen.res.status, 200);
     assert.match(seen.html, /Population practice note/);
     const hidden = await read(bea, reportUrl);
-    assert.equal(hidden.res.status, 403);
+    assert.equal(hidden.res.status, 200);
+    assert.match(hidden.html, /Population practice note/);
+    assert.match(hidden.html, /data-team="yapmark"/);
+    assert.match(hidden.html, /data-team="notchday"/);
 
     const guest = client();
     const support = await read(guest, "/support");
@@ -304,8 +314,11 @@ describe("daymark", { concurrency: 1 }, () => {
     const self = await cam.fetch(`/chats/${camId}`);
     assert.equal(self.status, 404);
     const blocked = await eli.fetch(`/chats/${camId}`);
-    assert.equal(blocked.status, 403);
-    assert.ok((await blocked.text()).includes(DISCLAIMER));
+    assert.equal(blocked.status, 200);
+    const blockedHtml = await blocked.text();
+    assert.ok(blockedHtml.includes(DISCLAIMER));
+    assert.match(blockedHtml, /data-team="flinttable"/);
+    assert.match(blockedHtml, /Flinttable Inc/);
 
     const empty = await post(cam, `/chats/${deeId}`, { csrf: csrfOf(camDesk.html), body: "   " });
     assert.equal(empty.status, 400);
@@ -339,8 +352,9 @@ describe("daymark", { concurrency: 1 }, () => {
     cam.ws = openSocket(cam.cookies.get("dm"));
     await cam.ws.ready;
     cam.ws.ws.send(JSON.stringify({ t: "ring", to: eliId, callId: "cross-sim", mode: "video" }));
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.equal(eliSock.messages.some((msg) => msg.t === "ring"), false);
+    const crossRing = await eliSock.until("ring");
+    assert.equal(crossRing.from, camId);
+    assert.equal(crossRing.callId, "cross-sim");
 
     const seen = await read(dee, `/chats/${camId}`);
     assert.match(seen.html, /Hello &lt;practice&gt;/);
@@ -357,11 +371,15 @@ describe("daymark", { concurrency: 1 }, () => {
 
     const deniedPost = await post(eli, `/chats/${camId}`, {
       csrf: csrfOf((await read(eli, "/desk")).html),
-      body: "This should stay out of the simulation.",
+      body: "Hello from the other team.",
     });
-    assert.equal(deniedPost.status, 403);
+    assert.equal(deniedPost.status, 303);
     const still = await read(cam, `/chats/${deeId}/messages?fragment=1`);
-    assert.equal(still.html.includes("stay out"), false);
+    assert.equal(still.html.includes("other team"), false);
+    const crossed = await read(cam, `/chats/${eliId}`);
+    assert.match(crossed.html, /Hello from the other team/);
+    assert.match(crossed.html, /data-team="yapmark"/);
+    assert.match(crossed.html, /Yapmark Corp/);
 
     const form = await read(cam, `/members/${deeId}`);
     assert.match(form.html, /Schedule a simulation meeting with Dee Brook/);
@@ -408,14 +426,14 @@ describe("daymark", { concurrency: 1 }, () => {
     const joinedPage = await read(dee, meetingUrl);
     assert.match(joinedPage.html, /Joined/);
     const outsider = await eli.fetch(meetingUrl);
-    assert.equal(outsider.status, 403);
+    assert.equal(outsider.status, 200);
     const outsiderMeet = await post(eli, `/members/${camId}/meeting`, {
       csrf: csrfOf((await read(eli, "/calendar")).html),
       title: "Cross simulation",
       starts_at: stamp(18),
       ends_at: stamp(19),
     });
-    assert.equal(outsiderMeet.status, 403);
+    assert.equal(outsiderMeet.status, 303);
 
     const interviews = await read(dee, "/interviews");
     const requested = await post(dee, "/interviews", {
@@ -506,8 +524,11 @@ describe("daymark", { concurrency: 1 }, () => {
     const moved = await post(nia, "/chartslate/login", { csrf: csrfOf(withPhoto.html) });
     assert.equal(moved.status, 303);
     const lockedPage = await read(nia, moved.headers.get("location"));
-    assert.match(lockedPage.html, /locked to one company simulation/);
-    assert.match(lockedPage.html, /not employment/i);
+    assert.match(lockedPage.html, /Flinttable Inc/);
+    assert.match(lockedPage.html, /permanent/);
+    const chartDoor = await read(nia, "/chartslate/room");
+    assert.equal(chartDoor.res.status, 200);
+    assert.match(chartDoor.html, /Chartslate Ltd/);
     const stillProfile = await read(nia, "/profile");
     assert.match(stillProfile.html, /nia\.stone@flinttable\.notchday\.simulation/);
     assert.equal(stillProfile.html.includes("chartslate.notchday.simulation"), false);
@@ -559,9 +580,11 @@ describe("daymark", { concurrency: 1 }, () => {
     const seen = await read(noe, "/yapmark/room");
     assert.match(seen.html, /Office talk, and almost no deck/);
     const outside = await read(poe, "/yapmark/room");
-    assert.equal(outside.html.includes("almost no deck"), false);
+    assert.match(outside.html, /almost no deck/);
+    assert.match(outside.html, /data-team="yapmark"/);
     const fragment = await poe.fetch("/yapmark/room/messages?fragment=1");
-    assert.equal(fragment.status, 403);
+    assert.equal(fragment.status, 200);
+    assert.match(await fragment.text(), /almost no deck/);
 
     const floor = await read(moe, "/yapmark/floor");
     const checked = await post(moe, "/yapmark/checkin", {
@@ -589,7 +612,8 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(downloaded.headers.get("content-disposition") || "", /attachment/);
     assert.equal(await downloaded.text(), "hello from the room");
     const blockedFile = await poe.fetch(filePath);
-    assert.equal(blockedFile.status, 403);
+    assert.equal(blockedFile.status, 200);
+    assert.equal(await blockedFile.text(), "hello from the room");
     const htmlFile = await postMultipart(moe, "/yapmark/files", csrfOf(moeRoom.html), {
       name: "upload",
       filename: "page.html",
@@ -623,7 +647,7 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(inbox.html, /HR inbox/);
     assert.match(inbox.html, /floor button sticks &lt;bug&gt;/);
     assert.match(inbox.html, /Poe was harmful in the simulation/);
-    assert.match(inbox.html, /about Poe Pitch/);
+    assert.match(inbox.html, /about <span class="team-marks">[\s\S]*data-team="flinttable"[\s\S]*Flinttable Inc\.[\s\S]*Poe Pitch/);
 
     const rival = await post(poe, "/rivalries", { csrf: csrfOf(poeStill.html), left: "yapmark", right: "flinttable" });
     assert.equal(rival.status, 403);
@@ -752,12 +776,13 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(listed.html, /1 comment/);
     const blocked = await post(moe, `${ideaUrl}/comments`, {
       csrf: csrfOf((await read(moe, "/desk")).html),
-      body: "Moe should not land on this pitch.",
+      body: "Moe can pitch in from another team.",
     });
     assert.equal(blocked.status, 303);
-    assert.match(blocked.headers.get("location"), /membership/);
     const still = await read(poe, ideaUrl);
-    assert.equal(still.html.includes("Moe should not land"), false);
+    assert.match(still.html, /Moe can pitch in from another team/);
+    assert.match(still.html, /data-team="yapmark"/);
+    assert.match(still.html, /Yapmark Corp/);
 
     const groups = await read(poe, "/groups");
     const made = await post(poe, "/groups", {
@@ -774,8 +799,12 @@ describe("daymark", { concurrency: 1 }, () => {
       csrf: csrfOf(opened.html),
       name: "Wrong floor",
       simulation: "yapmark",
+      join_rule: "open",
     });
-    assert.equal(wrongCompany.status, 400);
+    assert.equal(wrongCompany.status, 303);
+    const wrongGroup = await read(poe, pathOnly(wrongCompany.headers.get("location")));
+    assert.match(wrongGroup.html, /Wrong floor/);
+    assert.match(wrongGroup.html, /Yapmark Corp/);
     const sneak = await post(poe, `${groupUrl}/missions`, {
       csrf: csrfOf(opened.html),
       title: "Members do not send missions",
@@ -783,7 +812,7 @@ describe("daymark", { concurrency: 1 }, () => {
     });
     assert.equal(sneak.status, 403);
     const outsider = await moe.fetch(groupUrl);
-    assert.equal(outsider.status, 403);
+    assert.equal(outsider.status, 200);
     const quiGroups = await read(qui, "/groups");
     assert.match(quiGroups.html, /Hallway &lt;table&gt;/);
     const joined = await post(qui, `${groupUrl}/join`, { csrf: csrfOf(quiGroups.html) });
@@ -852,9 +881,9 @@ describe("daymark", { concurrency: 1 }, () => {
     const otherRoom = await read(moe, "/yapmark/room");
     assert.equal(otherRoom.html.includes("Quietest hallway"), false);
     const blockedContest = await moe.fetch(contestUrl);
-    assert.equal(blockedContest.status, 403);
+    assert.equal(blockedContest.status, 200);
     const moeContests = await read(moe, "/contests");
-    assert.equal(moeContests.html.includes("Quietest hallway"), false);
+    assert.match(moeContests.html, /Quietest hallway/);
   });
 
   test("simulation openings stay inside the work LARP", async () => {
@@ -910,9 +939,9 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.match(opening.html, /not real hiring/);
     assert.match(opening.html, /A simulation resume or a short note/);
     const outside = await cal.fetch(openingUrl);
-    assert.equal(outside.status, 403);
+    assert.equal(outside.status, 200);
     const calBoard = await read(cal, "/openings");
-    assert.equal(calBoard.html.includes("Spark keeper"), false);
+    assert.match(calBoard.html, /Spark keeper/);
 
     const applied = await post(bea, `${openingUrl}/apply`, {
       csrf: csrfOf(opening.html),
@@ -981,7 +1010,7 @@ describe("daymark", { concurrency: 1 }, () => {
 
     const groups = await read(ada, "/groups");
     assert.match(groups.html, /Join rule/);
-    assert.match(groups.html, /Anyone in the company can join/);
+    assert.match(groups.html, /Anyone from any team can join/);
     assert.match(groups.html, /A current member must accept the request/);
     assert.match(groups.html, /Only the team lead can accept the request/);
     assert.match(groups.html, /not a job/);
@@ -1030,7 +1059,7 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(selfAccept.status, 400);
     assert.equal((await read(bea, groupUrl)).html.includes(`action="${groupUrl}/leave"`), false);
     const outsider = await dee.fetch(groupUrl);
-    assert.equal(outsider.status, 403);
+    assert.equal(outsider.status, 200);
     const adaPage = await read(ada, groupUrl);
     assert.match(adaPage.html, /Bea Rule/);
     assert.match(adaPage.html, /Accept/);
@@ -1096,10 +1125,26 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(openJoin.status, 303);
     const openJoined = await read(bea, openUrl);
     assert.match(openJoined.html, new RegExp(`action="${openUrl}/leave"`));
-    assert.match(openJoined.html, /Anyone in the company can join/);
+    assert.match(openJoined.html, /Anyone from any team can join/);
   });
 
   test("think-tank gallery, data machine, bug reports, and a hidden owner", async () => {
+    const rejected = await submit(client(), "/signup", {
+      name: "No Notch",
+      email: "no-notch@example.com",
+      password: "practice-pass",
+      simulation: "notchday",
+      practice_title: "Studio guest",
+      practice_role: "Visitor",
+    });
+    assert.equal(rejected.res.status, 400);
+    assert.match(rejected.html, /invite-only or for subscribers/);
+    assert.equal(rejected.html.includes('value="notchday"'), false);
+    const pledged = client();
+    const desk = await signup(pledged, "Pledge Logo", "pledge-logo@example.com", "chartslate", "Graph voice", "Miner");
+    assert.match(desk.html, /data-team="chartslate"/);
+    assert.match(desk.html, /Chartslate Ltd/);
+    assert.match(desk.html, /permanent/);
     const home = await read(client(), "/");
     assert.match(home.html, /fake-company simulation, not a real employer\. Other humans sign up/);
     const flint = await read(client(), "/flinttable");
@@ -1197,6 +1242,21 @@ describe("daymark", { concurrency: 1 }, () => {
     assert.equal(profile.html.includes("Hanna Bridgham"), false);
     assert.equal(profile.html.includes("hanna.bridgham"), false);
     assert.equal(profile.html.includes("hmlbridgham@gmail.com"), false);
+    assert.match(profile.html, /data-team="notchday"/);
+    const noInvite = await post(pledged, "/membership/invite", {
+      csrf: csrfOf(desk.html),
+      email: "pledge-logo@example.com",
+    });
+    assert.equal(noInvite.status, 403);
+    const invite = await post(ceo, "/membership/invite", {
+      csrf: csrfOf(profile.html),
+      email: "pledge-logo@example.com",
+    });
+    assert.equal(invite.status, 303);
+    const marked = await read(pledged, "/desk");
+    assert.match(marked.html, /data-team="chartslate"/);
+    assert.match(marked.html, /data-team="notchday"/);
+    assert.match(marked.html, /permanent/);
     const outsider = client();
     await signup(outsider, "Nia Outside", "nia-outside@example.com", "yapmark", "Floor voice", "Talker");
     const hidden = await read(outsider, "/members");
