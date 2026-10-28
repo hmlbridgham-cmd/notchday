@@ -4,24 +4,28 @@ import { extname, join, normalize, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { clearCookie, hashPassword, parseCookies, sessionCookie, tokensEqual, verifyPassword } from "./lib/auth.mjs";
 import { belongsTo, canEnter, isCeo, sharesCompany } from "./lib/access.mjs";
-import { SEED, SIMS } from "./lib/copy.mjs";
+import { SEED, SIMS, TIP_URL } from "./lib/copy.mjs";
 import {
   activityScore,
   addCheckin,
   addComplaint,
   addIdeaNote,
+  saveContestEntry,
   addInterviewNote,
   addMeetingNote,
   addMessage,
   addRoomMessage,
   addSharedFile,
-  addSupport,
   addTeamMember,
   claimInterview,
   clearRivalry,
   completeInterview,
+  createContest,
+  createGroup,
+  createGroupTask,
   createIdea,
   createInterview,
+  createMission,
   createMeeting,
   createReport,
   createSession,
@@ -31,8 +35,13 @@ import {
   deleteSession,
   findUser,
   findUserByEmail,
+  getContest,
+  getGroup,
+  getGroupTask,
+  groupMembers,
   getIdea,
   getInterview,
+  getMission,
   getMeeting,
   getReport,
   getSharedFile,
@@ -40,14 +49,23 @@ import {
   getTeam,
   ideaNotes,
   interviewNotes,
+  isGroupMember,
   isTeamMember,
+  joinGroup,
   joinMeeting,
   latestCheckins,
+  leaveGroup,
   leaveTeam,
+  listContestEntries,
+  listContests,
+  listContestsFor,
   listChatPeers,
   listCompany,
   listComplaints,
   listFiles,
+  listGroupTasks,
+  listMissions,
+  listVisibleGroups,
   listIdeas,
   listInterviews,
   listJoinedOtherMeetings,
@@ -55,7 +73,6 @@ import {
   listMessages,
   listRivalries,
   listRoomMessages,
-  listSupport,
   listTasksForTeam,
   listTasksForUser,
   listTeamsFor,
@@ -74,6 +91,7 @@ import {
   setMembership,
   setReportShared,
   setRivalry,
+  setGroupTaskStatus,
   setSimulation,
   setTaskStatus,
   teamMembers,
@@ -83,16 +101,20 @@ import {
   userVoted,
 } from "./lib/db.mjs";
 import { cleanLine, cleanText, cleanZoomLink, validEmail, validStamp, wallStamp } from "./lib/format.mjs";
-import { notesHtml, noticeText } from "./lib/html.mjs";
+import { commentsHtml, notesHtml, noticeText } from "./lib/html.mjs";
 import {
   authPage,
   calendarPage,
   chatPage,
+  contestPage,
+  contestsPage,
   chatsPage,
   chatThread,
   deskPage,
   enterSimPage,
   floorPage,
+  groupPage,
+  groupsPage,
   homePage,
   ideaPage,
   ideasPage,
@@ -184,6 +206,18 @@ const routes = [
   ["POST", "/teams/:id/leave", teamLeave],
   ["POST", "/teams/:id/tasks", taskCreate],
   ["POST", "/tasks/:id", taskStatus],
+  ["GET", "/groups", groupsGet],
+  ["POST", "/groups", groupsPost],
+  ["GET", "/groups/:id", groupGet],
+  ["POST", "/groups/:id/join", groupJoin],
+  ["POST", "/groups/:id/leave", groupLeave],
+  ["POST", "/groups/:id/missions", missionPost],
+  ["POST", "/groups/:id/tasks", groupTaskPost],
+  ["POST", "/group-tasks/:id", groupTaskStatus],
+  ["GET", "/contests", contestsGet],
+  ["POST", "/contests", contestsPost],
+  ["GET", "/contests/:id", contestGet],
+  ["POST", "/contests/:id/entries", contestEntry],
   ["GET", "/calendar", calendar],
   ["POST", "/meetings", meetingCreate],
   ["GET", "/meetings/:id", meetingGet],
@@ -196,8 +230,10 @@ const routes = [
   ["POST", "/flinttable/ideas", ideaCreate],
   ["GET", "/flinttable/ideas/:id", ideaGet],
   ["POST", "/flinttable/ideas/:id/vote", ideaVote],
-  ["POST", "/flinttable/ideas/:id/notes", ideaNotePost],
-  ["GET", "/flinttable/ideas/:id/notes", ideaNoteGet],
+  ["POST", "/flinttable/ideas/:id/comments", ideaCommentPost],
+  ["GET", "/flinttable/ideas/:id/comments", ideaCommentGet],
+  ["POST", "/flinttable/ideas/:id/notes", ideaCommentPost],
+  ["GET", "/flinttable/ideas/:id/notes", ideaCommentGet],
   ["GET", "/chartslate/room", quarryGet],
   ["POST", "/chartslate/reports", reportCreate],
   ["GET", "/:sim/room/messages", roomMessages],
@@ -999,7 +1035,7 @@ function ideaGet(ctx, params) {
   }));
 }
 
-function ideaNotePost(ctx, params) {
+function ideaCommentPost(ctx, params) {
   if (!requireUser(ctx) || !requireCsrf(ctx)) return;
   const idea = getIdea(idOf(params));
   if (!idea) return gate(ctx, 404, "Not found", "That pitch is not on the table.");
@@ -1010,19 +1046,19 @@ function ideaNotePost(ctx, params) {
       idea,
       notes: ideaNotes(idea.id),
       canWrite: true,
-      error: "Write a simulation note.",
+      error: "Write a comment.",
     }));
     return;
   }
   addIdeaNote(idea.id, ctx.user.id, body);
-  redirect(ctx, `/flinttable/ideas/${idea.id}?m=note-saved`);
+  redirect(ctx, `/flinttable/ideas/${idea.id}?m=comment-saved`);
 }
 
-function ideaNoteGet(ctx, params) {
+function ideaCommentGet(ctx, params) {
   if (!requireUser(ctx)) return;
   const idea = getIdea(idOf(params));
   if (!idea) return gate(ctx, 404, "Not found", "That pitch is not on the table.");
-  if (ctx.query.get("fragment") === "1") return sendFragment(ctx, notesHtml(ideaNotes(idea.id)));
+  if (ctx.query.get("fragment") === "1") return sendFragment(ctx, commentsHtml(ideaNotes(idea.id)));
   redirect(ctx, `/flinttable/ideas/${idea.id}`);
 }
 
@@ -1049,16 +1085,7 @@ async function quarryGet(ctx) {
       error = err.message || "Public data did not load.";
     }
   }
-  sendHtml(ctx, 200, quarryPage(ctx, {
-    reports: listVisibleReports(ctx.user.id),
-    dataset,
-    city,
-    chartHtml,
-    error,
-    canWrite: true,
-    messages: listRoomMessages("chartslate"),
-    files: listFiles("chartslate"),
-  }));
+  sendHtml(ctx, 200, quarryPage(ctx, chartRoom(ctx, { dataset, city, chartHtml, error })));
 }
 
 async function reportCreate(ctx) {
@@ -1082,16 +1109,12 @@ async function reportCreate(ctx) {
     }
   }
   if (error) {
-    sendHtml(ctx, 400, quarryPage(ctx, {
-      reports: listVisibleReports(ctx.user.id),
+    sendHtml(ctx, 400, quarryPage(ctx, chartRoom(ctx, {
       dataset,
       city,
       chartHtml: chart ? barChart(chart) : "",
       error,
-      canWrite: true,
-      messages: listRoomMessages("chartslate"),
-      files: listFiles("chartslate"),
-    }));
+    })));
     return;
   }
   const id = createReport({
@@ -1276,19 +1299,204 @@ function checkinPost(ctx) {
   redirect(ctx, "/yapmark/floor?m=checkin-saved");
 }
 
+function groupsGet(ctx) {
+  if (!requireUser(ctx)) return;
+  sendHtml(ctx, 200, groupsPage(ctx, { groups: listVisibleGroups(ctx.user) }));
+}
+
+function groupsPost(ctx) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const name = cleanLine(ctx.body.get("name"), 80);
+  const simulation = simOf(ctx.body.get("simulation"));
+  if (!name || !simulation || !canEnter(ctx.user, simulation)) {
+    sendHtml(ctx, 400, groupsPage(ctx, {
+      groups: listVisibleGroups(ctx.user),
+      error: "Name a group in a company you belong to.",
+    }));
+    return;
+  }
+  const id = createGroup({ name, simulation, createdBy: ctx.user.id });
+  redirect(ctx, `/groups/${id}?m=group-made`);
+}
+
+function loadGroup(ctx, params) {
+  const group = getGroup(idOf(params));
+  if (!group) {
+    gate(ctx, 404, "Not found", "That simulation group is not here.");
+    return null;
+  }
+  if (!canEnter(ctx.user, group.simulation)) {
+    gate(ctx, 403, "Simulation group", "This group is for members of that company simulation.");
+    return null;
+  }
+  return group;
+}
+
+function groupView(ctx, group, error = "") {
+  return groupPage(ctx, {
+    group,
+    members: groupMembers(group.id),
+    missions: listMissions(group.id),
+    tasks: listGroupTasks(group.id),
+    joined: isGroupMember(group.id, ctx.user.id),
+    error,
+  });
+}
+
+function groupGet(ctx, params) {
+  if (!requireUser(ctx)) return;
+  const group = loadGroup(ctx, params);
+  if (!group) return;
+  sendHtml(ctx, 200, groupView(ctx, group));
+}
+
+function groupJoin(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const group = loadGroup(ctx, params);
+  if (!group) return;
+  joinGroup(group.id, ctx.user.id);
+  redirect(ctx, `/groups/${group.id}?m=group-joined`);
+}
+
+function groupLeave(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const group = loadGroup(ctx, params);
+  if (!group) return;
+  leaveGroup(group.id, ctx.user.id);
+  redirect(ctx, `/groups/${group.id}?m=group-left`);
+}
+
+function missionPost(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const group = loadGroup(ctx, params);
+  if (!group) return;
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Simulation mission", "Hanna sends simulation missions to groups.");
+  const title = cleanLine(ctx.body.get("title"), 120);
+  const brief = cleanText(ctx.body.get("brief"), 2000);
+  if (!title) return sendHtml(ctx, 400, groupView(ctx, group, "Name the simulation mission."));
+  createMission({ groupId: group.id, title, brief, createdBy: ctx.user.id });
+  redirect(ctx, `/groups/${group.id}?m=mission-sent`);
+}
+
+function groupTaskPost(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const group = loadGroup(ctx, params);
+  if (!group) return;
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Simulation task", "Hanna sends simulation tasks to groups.");
+  const title = cleanLine(ctx.body.get("title"), 120);
+  const detail = cleanText(ctx.body.get("detail"), 2000);
+  const missionId = Number(ctx.body.get("mission_id")) || 0;
+  const mission = missionId ? getMission(missionId) : null;
+  if (!title || (missionId && (!mission || mission.group_id !== group.id))) {
+    return sendHtml(ctx, 400, groupView(ctx, group, "Name the simulation task for this group."));
+  }
+  createGroupTask({
+    groupId: group.id,
+    missionId: mission ? mission.id : 0,
+    title,
+    detail,
+    createdBy: ctx.user.id,
+  });
+  redirect(ctx, `/groups/${group.id}?m=group-task`);
+}
+
+function groupTaskStatus(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const task = getGroupTask(idOf(params));
+  if (!task) return gate(ctx, 404, "Not found", "That simulation task is not here.");
+  if (!canEnter(ctx.user, task.simulation)) {
+    return gate(ctx, 403, "Simulation task", "This task belongs to another company simulation.");
+  }
+  if (!isGroupMember(task.group_id, ctx.user.id) && !isCeo(ctx.user)) {
+    return gate(ctx, 403, "Simulation task", "Join the group before you mark a task.");
+  }
+  setGroupTaskStatus(task.id, ctx.body.get("status") === "done" ? "done" : "open");
+  redirect(ctx, `/groups/${task.group_id}?m=group-task-updated`);
+}
+
+function contestsGet(ctx) {
+  if (!requireUser(ctx)) return;
+  sendHtml(ctx, 200, contestsPage(ctx, { contests: listContestsFor(ctx.user) }));
+}
+
+function contestsPost(ctx) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  if (!isCeo(ctx.user)) return gate(ctx, 403, "Company contest", "Hanna sends company-wide simulation contests.");
+  const simulation = simOf(ctx.body.get("simulation"));
+  const title = cleanLine(ctx.body.get("title"), 120);
+  const brief = cleanText(ctx.body.get("brief"), 2000);
+  if (!simulation || !title) {
+    return sendHtml(ctx, 400, contestsPage(ctx, {
+      contests: listContestsFor(ctx.user),
+      error: "Name the contest and pick a company.",
+    }));
+  }
+  const id = createContest({ simulation, title, brief, createdBy: ctx.user.id });
+  redirect(ctx, `/contests/${id}?m=contest-sent`);
+}
+
+function contestGet(ctx, params) {
+  if (!requireUser(ctx)) return;
+  const contest = getContest(idOf(params));
+  if (!contest) return gate(ctx, 404, "Not found", "That simulation contest is not here.");
+  if (!canEnter(ctx.user, contest.simulation)) {
+    return gate(ctx, 403, "Company contest", "This contest is for members of that company simulation.");
+  }
+  sendHtml(ctx, 200, contestPage(ctx, {
+    contest,
+    entries: listContestEntries(contest.id),
+    writer: true,
+  }));
+}
+
+function contestEntry(ctx, params) {
+  if (!requireUser(ctx) || !requireCsrf(ctx)) return;
+  const contest = getContest(idOf(params));
+  if (!contest) return gate(ctx, 404, "Not found", "That simulation contest is not here.");
+  if (!canEnter(ctx.user, contest.simulation)) return redirect(ctx, "/membership?m=locked");
+  const body = cleanText(ctx.body.get("body"), 2000);
+  if (!body) {
+    return sendHtml(ctx, 400, contestPage(ctx, {
+      contest,
+      entries: listContestEntries(contest.id),
+      writer: true,
+      error: "Write an entry.",
+    }));
+  }
+  saveContestEntry({ contestId: contest.id, userId: ctx.user.id, body });
+  redirect(ctx, `/contests/${contest.id}?m=contest-entered`);
+}
+
+function roomBundle(sim, extra = {}) {
+  return {
+    sim,
+    messages: listRoomMessages(sim),
+    files: listFiles(sim),
+    checkins: sim === "yapmark" ? latestCheckins(sim) : [],
+    pitches: sim === "flinttable" ? listIdeas() : [],
+    contests: listContests(sim),
+    ...extra,
+  };
+}
+
+function chartRoom(ctx, extra = {}) {
+  return {
+    reports: listVisibleReports(ctx.user.id),
+    messages: listRoomMessages("chartslate"),
+    files: listFiles("chartslate"),
+    contests: listContests("chartslate"),
+    canWrite: true,
+    ...extra,
+  };
+}
+
 function roomGet(ctx, params) {
   const sim = simOf(params.sim);
   if (!sim) return gate(ctx, 404, "Not found", "That page is not in the studio.");
   if (!requireUser(ctx)) return;
   if (sim === "chartslate") return quarryGet(ctx);
   if (!canEnter(ctx.user, sim)) return sendHtml(ctx, 200, enterSimPage(ctx, sim));
-  sendHtml(ctx, 200, roomPage(ctx, {
-    sim,
-    messages: listRoomMessages(sim),
-    files: listFiles(sim),
-    checkins: sim === "yapmark" ? latestCheckins(sim) : [],
-    pitches: sim === "flinttable" ? listIdeas() : [],
-  }));
+  sendHtml(ctx, 200, roomPage(ctx, roomBundle(sim)));
 }
 
 function roomPost(ctx, params) {
@@ -1298,14 +1506,7 @@ function roomPost(ctx, params) {
   if (!canEnter(ctx.user, sim)) return redirect(ctx, "/membership?m=locked");
   const body = cleanText(ctx.body.get("body"), 2000);
   if (!body) {
-    return sendHtml(ctx, 400, roomPage(ctx, {
-      sim,
-      messages: listRoomMessages(sim),
-      files: listFiles(sim),
-      error: "Write a room message.",
-      checkins: sim === "yapmark" ? latestCheckins(sim) : [],
-      pitches: sim === "flinttable" ? listIdeas() : [],
-    }));
+    return sendHtml(ctx, 400, roomPage(ctx, roomBundle(sim, { error: "Write a room message." })));
   }
   addRoomMessage({ simulation: sim, userId: ctx.user.id, body });
   redirect(ctx, `/${sim}/room?m=room-sent`);
@@ -1330,14 +1531,9 @@ function filePost(ctx, params) {
   const upload = typeof ctx.body.file === "function" ? ctx.body.file("upload") : null;
   const kind = sharedKind(upload);
   if (!kind) {
-    return sendHtml(ctx, 400, roomPage(ctx, {
-      sim,
-      messages: listRoomMessages(sim),
-      files: listFiles(sim),
+    return sendHtml(ctx, 400, roomPage(ctx, roomBundle(sim, {
       fileError: "Share a PNG, JPEG, WebP, PDF, TXT, or CSV under 2 MB.",
-      checkins: sim === "yapmark" ? latestCheckins(sim) : [],
-      pitches: sim === "flinttable" ? listIdeas() : [],
-    }));
+    })));
   }
   const id = addSharedFile({
     simulation: sim,
@@ -1402,41 +1598,11 @@ function textBytes(bytes) {
 }
 
 function supportGet(ctx) {
-  sendHtml(ctx, 200, supportPage(ctx, { notes: listSupport() }));
+  sendHtml(ctx, 200, supportPage(ctx));
 }
 
 function supportPost(ctx) {
-  if (!requireCsrf(ctx)) return;
-  if (cleanLine(ctx.body.get("company"), 80)) {
-    redirect(ctx, "/support?m=support");
-    return;
-  }
-  const amount = parseAmount(ctx.body);
-  const note = cleanLine(ctx.body.get("note"), 280);
-  const displayName = ctx.user ? "" : cleanLine(ctx.body.get("display_name"), 80);
-  if (amount.error || (!amount.cents && !note)) {
-    sendHtml(ctx, 400, supportPage(ctx, {
-      notes: listSupport(),
-      error: amount.error || "Leave a note or an amount. Nothing is charged.",
-    }));
-    return;
-  }
-  addSupport({
-    userId: ctx.user?.id,
-    displayName: ctx.user ? ctx.user.name : displayName,
-    amountCents: amount.cents,
-    note,
-  });
-  redirect(ctx, "/support?m=support");
-}
-
-function parseAmount(body) {
-  const raw = cleanLine(body.get("custom_amount"), 20) || cleanLine(body.get("amount"), 20);
-  if (!raw) return { cents: null };
-  if (!/^\d{1,5}(\.\d{1,2})?$/.test(raw)) return { error: "Enter a dollar amount like 15 or 15.00." };
-  const cents = Math.round(Number(raw) * 100);
-  if (cents < 100 || cents > 1_000_000) return { error: "Amounts here are between $1 and $10,000." };
-  return { cents };
+  redirect(ctx, TIP_URL);
 }
 
 function sendFragment(ctx, html) {

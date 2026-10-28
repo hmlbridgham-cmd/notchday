@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, test } from "node:test";
 import WebSocket from "ws";
-import { DISCLAIMER, SEED } from "../lib/copy.mjs";
+import { DISCLAIMER, SEED, TIP_URL } from "../lib/copy.mjs";
 import { barChart } from "../lib/quarry.mjs";
 import { start } from "../server.mjs";
 
@@ -22,6 +22,9 @@ describe("daymark", { concurrency: 1 }, () => {
       const { html, res } = await read(client(), path);
       assert.equal(res.status, 200, path);
       assert.ok(html.includes(DISCLAIMER), path);
+      assert.match(html, /work LARP \(live action role play\)/);
+      assert.equal(html.includes("rool"), false, path);
+      assert.ok(html.includes(TIP_URL), path);
       for (const phrase of banned) assert.equal(html.toLowerCase().includes(phrase), false, `${path} ${phrase}`);
     }
     const home = await read(client(), "/");
@@ -43,6 +46,9 @@ describe("daymark", { concurrency: 1 }, () => {
     const support = await read(client(), "/support");
     assert.match(support.html, /does not charge a card/i);
     assert.match(support.html, /Notchday employee/);
+    assert.ok(support.html.includes(TIP_URL));
+    assert.equal(support.html.includes('action="/support"'), false);
+    assert.equal(support.html.includes('name="amount"'), false);
     assert.equal(support.html.includes('name="card"'), false);
     assert.equal(support.html.includes("253-241-7270"), false);
     const membership = await read(client(), "/membership");
@@ -230,15 +236,10 @@ describe("daymark", { concurrency: 1 }, () => {
     const guest = client();
     const support = await read(guest, "/support");
     assert.equal(support.html.includes("253-241-7270"), false);
-    const donated = await post(guest, "/support", {
-      csrf: csrfOf(support.html),
-      amount: "15",
-      note: "For the studio.",
-    });
+    assert.ok(support.html.includes(`href="${TIP_URL}"`));
+    const donated = await post(guest, "/support", { amount: "15", note: "For the studio." });
     assert.equal(donated.status, 303);
-    const thanks = await read(guest, donated.headers.get("location"));
-    assert.match(thanks.html, /No card was charged/);
-    assert.match(thanks.html, /\$15\.00/);
+    assert.equal(donated.headers.get("location"), TIP_URL);
   });
 
   test("call signaling rings another member", async () => {
@@ -636,6 +637,139 @@ describe("daymark", { concurrency: 1 }, () => {
     await post(qui, `${ideaUrl}/vote`, { csrf: csrfOf(quiPage.html) });
     const both = await read(poe, ideaUrl);
     assert.match(both.html, /2 votes/);
+  });
+
+  test("pitch comments, self-organized groups, missions, and contests", async () => {
+    const poe = client();
+    const qui = client();
+    const moe = client();
+    const poeDesk = await signup(poe, "Poe Comment", "poe-comment@example.com", "flinttable", "Pitch voice", "Striker");
+    await signup(qui, "Qui Comment", "qui-comment@example.com", "flinttable", "Second pitch", "Voter");
+    await signup(moe, "Moe Outside", "moe-outside@example.com", "yapmark", "Floor voice", "Talker");
+    assert.match(poeDesk.html, /Simulation groups/);
+
+    const table = await read(poe, "/flinttable/table");
+    const idea = await post(poe, "/flinttable/ideas", {
+      csrf: csrfOf(table.html),
+      title: "Comment on the spark",
+      pitch: "Leave a comment before the vote.",
+    });
+    const ideaUrl = pathOnly(idea.headers.get("location"));
+    const ideaPage = await read(qui, ideaUrl);
+    assert.match(ideaPage.html, /Comments/);
+    const commented = await post(qui, `${ideaUrl}/comments`, {
+      csrf: csrfOf(ideaPage.html),
+      body: "Sharper if the spark stays small <spark>",
+    });
+    assert.equal(commented.status, 303);
+    const withComment = await read(poe, ideaUrl);
+    assert.match(withComment.html, /Sharper if the spark stays small &lt;spark&gt;/);
+    assert.match(withComment.html, /Qui Comment/);
+    const listed = await read(poe, "/flinttable/table");
+    assert.match(listed.html, /1 comment/);
+    const blocked = await post(moe, `${ideaUrl}/comments`, {
+      csrf: csrfOf((await read(moe, "/desk")).html),
+      body: "Moe should not land on this pitch.",
+    });
+    assert.equal(blocked.status, 303);
+    assert.match(blocked.headers.get("location"), /membership/);
+    const still = await read(poe, ideaUrl);
+    assert.equal(still.html.includes("Moe should not land"), false);
+
+    const groups = await read(poe, "/groups");
+    const made = await post(poe, "/groups", {
+      csrf: csrfOf(groups.html),
+      name: "Hallway <table>",
+      simulation: "flinttable",
+    });
+    assert.equal(made.status, 303);
+    const groupUrl = pathOnly(made.headers.get("location"));
+    const opened = await read(poe, groupUrl);
+    assert.match(opened.html, /Hallway &lt;table&gt;/);
+    const wrongCompany = await post(poe, "/groups", {
+      csrf: csrfOf(opened.html),
+      name: "Wrong floor",
+      simulation: "yapmark",
+    });
+    assert.equal(wrongCompany.status, 400);
+    const sneak = await post(poe, `${groupUrl}/missions`, {
+      csrf: csrfOf(opened.html),
+      title: "Members do not send missions",
+      brief: "This should fail.",
+    });
+    assert.equal(sneak.status, 403);
+    const outsider = await moe.fetch(groupUrl);
+    assert.equal(outsider.status, 403);
+    const quiGroups = await read(qui, "/groups");
+    assert.match(quiGroups.html, /Hallway &lt;table&gt;/);
+    const joined = await post(qui, `${groupUrl}/join`, { csrf: csrfOf(quiGroups.html) });
+    assert.equal(joined.status, 303);
+    const quiGroup = await read(qui, groupUrl);
+    assert.match(quiGroup.html, /Qui Comment/);
+    assert.match(quiGroup.html, /Hanna Bridgham, the only CEO/);
+
+    const hanna = client();
+    await submit(hanna, "/login", { email: SEED.email, password: SEED.password, next: "/groups" });
+    const hannaGroup = await read(hanna, groupUrl);
+    const mission = await post(hanna, `${groupUrl}/missions`, {
+      csrf: csrfOf(hannaGroup.html),
+      title: "Keep the spark in the hallway",
+      brief: "A simulation mission, not a job <brief>",
+    });
+    assert.equal(mission.status, 303);
+    const afterMission = await read(hanna, groupUrl);
+    const task = await post(hanna, `${groupUrl}/tasks`, {
+      csrf: csrfOf(afterMission.html),
+      title: "Pin one spark",
+      detail: "Simulation task for the group.",
+      mission_id: "0",
+    });
+    assert.equal(task.status, 303);
+    const assigned = await read(qui, groupUrl);
+    assert.match(assigned.html, /Keep the spark in the hallway/);
+    assert.match(assigned.html, /not a job &lt;brief&gt;/);
+    assert.match(assigned.html, /Pin one spark/);
+    assert.match(assigned.html, /Simulation task from Hanna/);
+    const taskAction = assigned.html.match(/action="(\/group-tasks\/\d+)"/);
+    assert.ok(taskAction);
+    const finished = await post(qui, taskAction[1], { csrf: csrfOf(assigned.html), status: "done" });
+    assert.equal(finished.status, 303);
+    const done = await read(poe, groupUrl);
+    assert.match(done.html, /Marked finished/);
+
+    const contests = await read(hanna, "/contests");
+    const sent = await post(hanna, "/contests", {
+      csrf: csrfOf(contests.html),
+      simulation: "flinttable",
+      title: "Quietest hallway",
+      brief: "Company-wide, and still a simulation.",
+    });
+    assert.equal(sent.status, 303);
+    const contestUrl = pathOnly(sent.headers.get("location"));
+    const denied = await post(moe, "/contests", {
+      csrf: csrfOf((await read(moe, "/desk")).html),
+      simulation: "yapmark",
+      title: "Moe contest",
+      brief: "No.",
+    });
+    assert.equal(denied.status, 403);
+    const poeContest = await read(poe, contestUrl);
+    assert.match(poeContest.html, /Quietest hallway/);
+    const entered = await post(poe, `${contestUrl}/entries`, {
+      csrf: csrfOf(poeContest.html),
+      body: "I brought one spark <entry>",
+    });
+    assert.equal(entered.status, 303);
+    const entries = await read(qui, contestUrl);
+    assert.match(entries.html, /I brought one spark &lt;entry&gt;/);
+    const room = await read(poe, "/flinttable/room");
+    assert.match(room.html, /Quietest hallway/);
+    const otherRoom = await read(moe, "/yapmark/room");
+    assert.equal(otherRoom.html.includes("Quietest hallway"), false);
+    const blockedContest = await moe.fetch(contestUrl);
+    assert.equal(blockedContest.status, 403);
+    const moeContests = await read(moe, "/contests");
+    assert.equal(moeContests.html.includes("Quietest hallway"), false);
   });
 });
 

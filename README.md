@@ -1,12 +1,14 @@
 # Notchday
 
-Notchday is a simulation studio. Hanna Bridgham is the only CEO.
+Notchday is a simulation studio and a work LARP (live action role play). Hanna Bridgham is the only CEO. You play a company simulation. It is not a job.
 
-Yapmark, Flinttable, and Chartslate are separate company simulations. They are not jobs, not employers, and not work history. Each one has its own features and its own members. A Notchday employee option is a paid simulation membership, not employment. It includes all three companies. This app does not charge a card.
+Yapmark, Flinttable, and Chartslate are separate company simulations. They are not jobs, not employers, and not work history. Each one has its own features and its own members. A Notchday employee option is a paid simulation membership, not employment. It includes all three companies. This app does not charge a card. Support the project opens https://rfab.ai/tip/f826f793-6969-4917-93bd-9a2275ad2943.
 
 Yapmark, Flinttable, and Chartslate each have their own door, look, and login. Notchday stays in the footer as the studio.
 
-A signup email stays with one company. Members on that company team can say hello, use the company room, and share a file inside the app. Yapmark has a check-in board. Flinttable has pitches and votes. Chartslate’s room is for graphs.
+A signup email stays with one company. Members on that company team can say hello, use the company room, and share a file inside the app. Yapmark has a check-in board. Flinttable has pitches, comments, and votes. Chartslate’s room is for graphs.
+
+Members of a company can form a simulation group and other members of that company can join it themselves. Hanna can send simulation missions and tasks to a group. She can also send a company-wide simulation contest.
 
 Members who share a company can send simulation chat and schedule a simulation meeting. A meeting can store an optional Zoom link that a member pastes in. There is no in-app video calling.
 
